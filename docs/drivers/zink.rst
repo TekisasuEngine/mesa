@@ -300,47 +300,25 @@ variable:
   ``gpl``
     Force using Graphics Pipeline Library for all shaders
   ``rp``
-    Enable render pass optimizations (for tiling GPUs)
+    Enable renderpass optimizations (for tiling GPUs)
   ``norp``
-    Disable render pass optimizations (for tiling GPUs)
+    Disable renderpass optimizations (for tiling GPUs)
   ``map``
     Print info about mapped VRAM
   ``flushsync``
     Force synchronous flushes/presents
-  ``noshobj``
-    Disable EXT_shader_object
-  ``optimal_keys``
-    Debug/use optimal_keys
-  ``noopt``
-    Disable async optimized pipeline compiles
-  ``nobgc``
-    Disable all async pipeline compiles
-  ``mem``
-    Enable memory allocation debugging
-  ``quiet``
-    Suppress probably-harmless warnings
 
 Vulkan Validation Layers
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
 Another useful tool for debugging is the `Vulkan Validation Layers
-<https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/main/README.md>`__.
+<https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/master/README.md>`__.
 
 The validation layers effectively insert extra checking between Zink and the
 Vulkan driver, pointing out incorrect usage of the Vulkan API. The layers can
-be enabled by setting the environment variable :envvar:`VK_LOADER_LAYERS_ENABLE` to
-``VK_LAYER_KHRONOS_validation``. You can read more about the Validation Layers
+be enabled by setting the environment variable :envvar:`VK_INSTANCE_LAYERS` to
+"VK_LAYER_KHRONOS_validation". You can read more about the Validation Layers
 in the link above.
-
-Apple macOS and MoltenVK
-------------------------
-
-Zink on macOS is experimental with very limited capabilities.
-The Vulkan SDK (1.3.250 or newer) is required to build Zink.
-Set the build option ``-Dmoltenvk-dir=<directory>`` to point at your Vulkan SDK install or MoltenVK build.
-Add Zink to the Gallium drivers build option ``-Dgallium-drivers=zink``.
-If installed using ``brew``, you can set ``-D moltenvk-dir=$(brew --prefix molten-vk)``.
-
 
 IRC
 ---

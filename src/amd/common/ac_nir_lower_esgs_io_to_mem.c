@@ -1,11 +1,28 @@
 /*
  * Copyright © 2021 Valve Corporation
  *
- * SPDX-License-Identifier: MIT
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ *
  */
 
 #include "ac_nir.h"
-#include "ac_nir_helpers.h"
 #include "nir_builder.h"
 
 /*
@@ -35,23 +52,18 @@ typedef struct {
 
    /* Enable fix for triangle strip adjacency in geometry shader. */
    bool gs_triangle_strip_adjacency_fix;
-
-   /* Bit mask of inputs read by the GS,
-    * this is used for linking ES outputs to GS inputs.
-    */
-   uint64_t gs_inputs_read;
 } lower_esgs_io_state;
 
-static nir_def *
-emit_split_buffer_load(nir_builder *b, unsigned num_components, unsigned bit_size,
-                       unsigned component_stride, nir_def *desc, nir_def *v_off, nir_def *s_off)
+static nir_ssa_def *
+emit_split_buffer_load(nir_builder *b, nir_ssa_def *desc, nir_ssa_def *v_off, nir_ssa_def *s_off,
+                       unsigned component_stride, unsigned num_components, unsigned bit_size)
 {
    unsigned total_bytes = num_components * bit_size / 8u;
    unsigned full_dwords = total_bytes / 4u;
    unsigned remaining_bytes = total_bytes - full_dwords * 4u;
 
-   /* Accommodate max number of split 64-bit loads */
-   nir_def *comps[NIR_MAX_VEC_COMPONENTS * 2u];
+   /* Accomodate max number of split 64-bit loads */
+   nir_ssa_def *comps[NIR_MAX_VEC_COMPONENTS * 2u];
 
    /* Assume that 1x32-bit load is better than 1x16-bit + 1x8-bit */
    if (remaining_bytes == 3) {
@@ -59,7 +71,7 @@ emit_split_buffer_load(nir_builder *b, unsigned num_components, unsigned bit_siz
       full_dwords++;
    }
 
-   nir_def *zero = nir_imm_int(b, 0);
+   nir_ssa_def *zero = nir_imm_int(b, 0);
 
    for (unsigned i = 0; i < full_dwords; ++i)
       comps[i] = nir_load_buffer_amd(b, 1, 32, desc, v_off, s_off, zero,
@@ -76,10 +88,11 @@ emit_split_buffer_load(nir_builder *b, unsigned num_components, unsigned bit_siz
 }
 
 static void
-emit_split_buffer_store(nir_builder *b, nir_def *d, nir_def *desc, nir_def *v_off, nir_def *s_off,
-                        unsigned bit_size, unsigned const_offset, unsigned writemask, bool swizzled, bool slc)
+emit_split_buffer_store(nir_builder *b, nir_ssa_def *d, nir_ssa_def *desc, nir_ssa_def *v_off, nir_ssa_def *s_off,
+                        unsigned component_stride, unsigned num_components, unsigned bit_size,
+                        unsigned writemask, bool swizzled, bool slc)
 {
-   nir_def *zero = nir_imm_int(b, 0);
+   nir_ssa_def *zero = nir_imm_int(b, 0);
 
    while (writemask) {
       int start, count;
@@ -96,11 +109,11 @@ emit_split_buffer_store(nir_builder *b, nir_def *d, nir_def *desc, nir_def *v_of
          else if ((start_byte % 4) == 2)
             store_bytes = MIN2(store_bytes, 2);
 
-         nir_def *store_val = nir_extract_bits(b, &d, 1, start_byte * 8u, 1, store_bytes * 8u);
+         nir_ssa_def *store_val = nir_extract_bits(b, &d, 1, start_byte * 8u, 1, store_bytes * 8u);
          nir_store_buffer_amd(b, store_val, desc, v_off, s_off, zero,
-                              .base = start_byte + const_offset, .memory_modes = nir_var_shader_out,
+                              .base = start_byte, .memory_modes = nir_var_shader_out,
                               .access = ACCESS_COHERENT |
-                                        (slc ? ACCESS_NON_TEMPORAL : 0) |
+                                        (slc ? ACCESS_STREAM_CACHE_POLICY : 0) |
                                         (swizzled ? ACCESS_IS_SWIZZLED_AMD : 0));
 
          start_byte += store_bytes;
@@ -111,9 +124,14 @@ emit_split_buffer_store(nir_builder *b, nir_def *d, nir_def *desc, nir_def *v_of
 
 static bool
 lower_es_output_store(nir_builder *b,
-                      nir_intrinsic_instr *intrin,
+                      nir_instr *instr,
                       void *state)
 {
+   if (instr->type != nir_instr_type_intrinsic)
+      return false;
+
+   nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
+
    if (intrin->intrinsic != nir_intrinsic_store_output)
       return false;
 
@@ -143,50 +161,41 @@ lower_es_output_store(nir_builder *b,
     *
     * So writes to those outputs in ES are simply ignored.
     */
-   const nir_io_semantics io_sem = nir_intrinsic_io_semantics(intrin);
-   if (io_sem.location == VARYING_SLOT_LAYER || io_sem.location == VARYING_SLOT_VIEWPORT) {
-      nir_instr_remove(&intrin->instr);
+   unsigned semantic = nir_intrinsic_io_semantics(intrin).location;
+   if (semantic == VARYING_SLOT_LAYER || semantic == VARYING_SLOT_VIEWPORT) {
+      nir_instr_remove(instr);
       return true;
    }
 
    lower_esgs_io_state *st = (lower_esgs_io_state *) state;
+   unsigned write_mask = nir_intrinsic_write_mask(intrin);
 
-   /* When an ES output isn't read by GS, don't emit anything. */
-   if ((io_sem.no_varying || !(st->gs_inputs_read & BITFIELD64_BIT(io_sem.location)))) {
-      nir_instr_remove(&intrin->instr);
-      return true;
-   }
-
-   const unsigned write_mask = nir_intrinsic_write_mask(intrin);
-
-   b->cursor = nir_before_instr(&intrin->instr);
-   unsigned mapped = ac_nir_map_io_location(io_sem.location, st->gs_inputs_read, st->map_io);
-   nir_def *io_off = ac_nir_calc_io_off(b, intrin, nir_imm_int(b, 16u), 4u, mapped);
-   nir_def *store_val = intrin->src[0].ssa;
+   b->cursor = nir_before_instr(instr);
+   nir_ssa_def *io_off = ac_nir_calc_io_offset(b, intrin, nir_imm_int(b, 16u), 4u, st->map_io);
 
    if (st->gfx_level <= GFX8) {
       /* GFX6-8: ES is a separate HW stage, data is passed from ES to GS in VRAM. */
-      nir_def *ring = nir_load_ring_esgs_amd(b);
-      nir_def *es2gs_off = nir_load_ring_es2gs_offset_amd(b);
-      AC_NIR_STORE_IO(b, store_val, 0, write_mask, io_sem.high_16bits, emit_split_buffer_store,
-                      ring, io_off, es2gs_off, store_val->bit_size, store_const_offset,
-                      store_write_mask, true, true);
+      nir_ssa_def *ring = nir_build_load_ring_esgs_amd(b);
+      nir_ssa_def *es2gs_off = nir_build_load_ring_es2gs_offset_amd(b);
+      emit_split_buffer_store(b, intrin->src[0].ssa, ring, io_off, es2gs_off, 4u,
+                              intrin->src[0].ssa->num_components, intrin->src[0].ssa->bit_size,
+                              write_mask, true, true);
    } else {
       /* GFX9+: ES is merged into GS, data is passed through LDS. */
-      nir_def *vertex_idx = nir_load_local_invocation_index(b);
-      nir_def *off = nir_iadd(b, nir_imul_imm(b, vertex_idx, st->esgs_itemsize), io_off);
-      AC_NIR_STORE_IO(b, store_val, 0, write_mask, io_sem.high_16bits, nir_store_shared, off,
-                      .write_mask = store_write_mask, .base = store_const_offset);
+      nir_ssa_def *vertex_idx = nir_build_load_local_invocation_index(b);
+      nir_ssa_def *off = nir_iadd(b, nir_imul_imm(b, vertex_idx, st->esgs_itemsize), io_off);
+      nir_build_store_shared(b, intrin->src[0].ssa, off, .write_mask = write_mask,
+                             .align_mul = 16u, .align_offset = (nir_intrinsic_component(intrin) * 4u) % 16u);
    }
 
-   nir_instr_remove(&intrin->instr);
+   nir_instr_remove(instr);
    return true;
 }
 
-static nir_def *
+static nir_ssa_def *
 gs_get_vertex_offset(nir_builder *b, lower_esgs_io_state *st, unsigned vertex_index)
 {
-   nir_def *origin = nir_load_gs_vertex_offset_amd(b, .base = vertex_index);
+   nir_ssa_def *origin = nir_build_load_gs_vertex_offset_amd(b, .base = vertex_index);
    if (!st->gs_triangle_strip_adjacency_fix)
       return origin;
 
@@ -200,47 +209,47 @@ gs_get_vertex_offset(nir_builder *b, lower_esgs_io_state *st, unsigned vertex_in
       /* 6 vertex offset are packed to 3 vgprs for GFX9+ */
       fixed_index = (vertex_index + 2) % 3;
    }
-   nir_def *fixed = nir_load_gs_vertex_offset_amd(b, .base = fixed_index);
+   nir_ssa_def *fixed = nir_build_load_gs_vertex_offset_amd(b, .base = fixed_index);
 
-   nir_def *prim_id = nir_load_primitive_id(b);
+   nir_ssa_def *prim_id = nir_load_primitive_id(b);
    /* odd primitive id use fixed offset */
-   nir_def *cond = nir_i2b(b, nir_iand_imm(b, prim_id, 1));
+   nir_ssa_def *cond = nir_i2b(b, nir_iand_imm(b, prim_id, 1));
    return nir_bcsel(b, cond, fixed, origin);
 }
 
-static nir_def *
+static nir_ssa_def *
 gs_per_vertex_input_vertex_offset_gfx6(nir_builder *b, lower_esgs_io_state *st,
                                        nir_src *vertex_src)
 {
    if (nir_src_is_const(*vertex_src))
       return gs_get_vertex_offset(b, st, nir_src_as_uint(*vertex_src));
 
-   nir_def *vertex_offset = gs_get_vertex_offset(b, st, 0);
+   nir_ssa_def *vertex_offset = gs_get_vertex_offset(b, st, 0);
 
    for (unsigned i = 1; i < b->shader->info.gs.vertices_in; ++i) {
-      nir_def *cond = nir_ieq_imm(b, vertex_src->ssa, i);
-      nir_def *elem = gs_get_vertex_offset(b, st, i);
+      nir_ssa_def *cond = nir_ieq_imm(b, vertex_src->ssa, i);
+      nir_ssa_def *elem = gs_get_vertex_offset(b, st, i);
       vertex_offset = nir_bcsel(b, cond, elem, vertex_offset);
    }
 
    return vertex_offset;
 }
 
-static nir_def *
+static nir_ssa_def *
 gs_per_vertex_input_vertex_offset_gfx9(nir_builder *b, lower_esgs_io_state *st,
                                        nir_src *vertex_src)
 {
    if (nir_src_is_const(*vertex_src)) {
       unsigned vertex = nir_src_as_uint(*vertex_src);
-      return nir_ubfe_imm(b, gs_get_vertex_offset(b, st, vertex / 2u),
-                          (vertex & 1u) * 16u, 16u);
+      return nir_ubfe(b, gs_get_vertex_offset(b, st, vertex / 2u),
+                      nir_imm_int(b, (vertex & 1u) * 16u), nir_imm_int(b, 16u));
    }
 
-   nir_def *vertex_offset = gs_get_vertex_offset(b, st, 0);
+   nir_ssa_def *vertex_offset = gs_get_vertex_offset(b, st, 0);
 
    for (unsigned i = 1; i < b->shader->info.gs.vertices_in; i++) {
-      nir_def *cond = nir_ieq_imm(b, vertex_src->ssa, i);
-      nir_def *elem = gs_get_vertex_offset(b, st, i / 2u * 2u);
+      nir_ssa_def *cond = nir_ieq_imm(b, vertex_src->ssa, i);
+      nir_ssa_def *elem = gs_get_vertex_offset(b, st, i / 2u * 2u);
       if (i % 2u)
          elem = nir_ishr_imm(b, elem, 16u);
 
@@ -250,38 +259,15 @@ gs_per_vertex_input_vertex_offset_gfx9(nir_builder *b, lower_esgs_io_state *st,
    return nir_iand_imm(b, vertex_offset, 0xffffu);
 }
 
-static nir_def *
-gs_per_vertex_input_vertex_offset_gfx12(nir_builder *b, lower_esgs_io_state *st,
-                                        nir_src *vertex_src)
-{
-   if (nir_src_is_const(*vertex_src)) {
-      unsigned vertex = nir_src_as_uint(*vertex_src);
-      return nir_ubfe_imm(b, gs_get_vertex_offset(b, st, vertex / 3),
-                          (vertex % 3) * 9, 8);
-   }
-
-   nir_def *bitoffset = nir_imul_imm(b, nir_umod_imm(b, vertex_src->ssa, 3), 9);
-   nir_def *lt3 = nir_ult(b, vertex_src->ssa, nir_imm_int(b, 3));
-
-   return nir_bcsel(b, lt3,
-                    nir_ubfe(b, gs_get_vertex_offset(b, st, 0), bitoffset, nir_imm_int(b, 8)),
-                    nir_ubfe(b, gs_get_vertex_offset(b, st, 1), bitoffset, nir_imm_int(b, 8)));
-}
-
-static nir_def *
+static nir_ssa_def *
 gs_per_vertex_input_offset(nir_builder *b,
                            lower_esgs_io_state *st,
                            nir_intrinsic_instr *instr)
 {
    nir_src *vertex_src = nir_get_io_arrayed_index_src(instr);
-   nir_def *vertex_offset;
-
-   if (st->gfx_level >= GFX12)
-      vertex_offset = gs_per_vertex_input_vertex_offset_gfx12(b, st, vertex_src);
-   else if (st->gfx_level >= GFX9)
-      vertex_offset = gs_per_vertex_input_vertex_offset_gfx9(b, st, vertex_src);
-   else
-      vertex_offset = gs_per_vertex_input_vertex_offset_gfx6(b, st, vertex_src);
+   nir_ssa_def *vertex_offset = st->gfx_level >= GFX9
+      ? gs_per_vertex_input_vertex_offset_gfx9(b, st, vertex_src)
+      : gs_per_vertex_input_vertex_offset_gfx6(b, st, vertex_src);
 
    /* Gfx6-8 can't emulate VGT_ESGS_RING_ITEMSIZE because it uses the register to determine
     * the allocation size of the ESGS ring buffer in memory.
@@ -290,33 +276,28 @@ gs_per_vertex_input_offset(nir_builder *b,
       vertex_offset = nir_imul(b, vertex_offset, nir_load_esgs_vertex_stride_amd(b));
 
    unsigned base_stride = st->gfx_level >= GFX9 ? 1 : 64 /* Wave size on GFX6-8 */;
-   const nir_io_semantics io_sem = nir_intrinsic_io_semantics(instr);
-   unsigned mapped = ac_nir_map_io_location(io_sem.location, st->gs_inputs_read, st->map_io);
-   nir_def *io_off = ac_nir_calc_io_off(b, instr, nir_imm_int(b, base_stride * 4u), base_stride, mapped);
-   nir_def *off = nir_iadd(b, io_off, vertex_offset);
+   nir_ssa_def *io_off = ac_nir_calc_io_offset(b, instr, nir_imm_int(b, base_stride * 4u), base_stride, st->map_io);
+   nir_ssa_def *off = nir_iadd(b, io_off, vertex_offset);
    return nir_imul_imm(b, off, 4u);
 }
 
-static nir_def *
+static nir_ssa_def *
 lower_gs_per_vertex_input_load(nir_builder *b,
                                nir_instr *instr,
                                void *state)
 {
    lower_esgs_io_state *st = (lower_esgs_io_state *) state;
    nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
-   const nir_io_semantics io_sem = nir_intrinsic_io_semantics(intrin);
-   nir_def *off = gs_per_vertex_input_offset(b, st, intrin);
-   nir_def *load = NULL;
+   nir_ssa_def *off = gs_per_vertex_input_offset(b, st, intrin);
 
-   if (st->gfx_level >= GFX9) {
-      AC_NIR_LOAD_IO(load, b, intrin->num_components, intrin->def.bit_size, io_sem.high_16bits,
-                     nir_load_shared, off);
-   } else {
-      AC_NIR_LOAD_IO(load, b, intrin->num_components, intrin->def.bit_size, io_sem.high_16bits,
-                     emit_split_buffer_load, 4 * 64, nir_load_ring_esgs_amd(b), off, nir_imm_int(b, 0));
-   }
+   if (st->gfx_level >= GFX9)
+      return nir_build_load_shared(b, intrin->dest.ssa.num_components, intrin->dest.ssa.bit_size, off,
+                                   .align_mul = 16u, .align_offset = (nir_intrinsic_component(intrin) * 4u) % 16u);
 
-   return load;
+   unsigned wave_size = 64u; /* GFX6-8 only support wave64 */
+   nir_ssa_def *ring = nir_build_load_ring_esgs_amd(b);
+   return emit_split_buffer_load(b, ring, off, nir_imm_zero(b, 1, 32), 4u * wave_size,
+                                 intrin->dest.ssa.num_components, intrin->dest.ssa.bit_size);
 }
 
 static bool
@@ -329,18 +310,17 @@ void
 ac_nir_lower_es_outputs_to_mem(nir_shader *shader,
                                ac_nir_map_io_driver_location map,
                                enum amd_gfx_level gfx_level,
-                               unsigned esgs_itemsize,
-                               uint64_t gs_inputs_read)
+                               unsigned esgs_itemsize)
 {
    lower_esgs_io_state state = {
       .gfx_level = gfx_level,
       .esgs_itemsize = esgs_itemsize,
       .map_io = map,
-      .gs_inputs_read = gs_inputs_read,
    };
 
-   nir_shader_intrinsics_pass(shader, lower_es_output_store,
-                                nir_metadata_control_flow,
+   nir_shader_instructions_pass(shader,
+                                lower_es_output_store,
+                                nir_metadata_block_index | nir_metadata_dominance,
                                 &state);
 }
 
@@ -354,7 +334,6 @@ ac_nir_lower_gs_inputs_to_mem(nir_shader *shader,
       .gfx_level = gfx_level,
       .map_io = map,
       .gs_triangle_strip_adjacency_fix = triangle_strip_adjacency_fix,
-      .gs_inputs_read = shader->info.inputs_read,
    };
 
    nir_shader_lower_instructions(shader,

@@ -27,7 +27,6 @@
  **************************************************************************/
 
 #include "util/u_memory.h"
-#include "lp_bld_const.h"
 #include "lp_bld_type.h"
 #include "lp_bld_init.h"
 #include "lp_bld_flow.h"
@@ -52,16 +51,16 @@ func_ctx(struct lp_exec_mask *mask)
  * no loop inside the current function, but we were inside
  * a loop inside another function, from which this one was called.
  */
-static inline bool
+static inline boolean
 mask_has_loop(struct lp_exec_mask *mask)
 {
    int i;
    for (i = mask->function_stack_size - 1; i >= 0; --i) {
       const struct function_ctx *ctx = &mask->function_stack[i];
       if (ctx->loop_stack_size > 0)
-         return true;
+         return TRUE;
    }
-   return false;
+   return FALSE;
 }
 
 /*
@@ -70,16 +69,16 @@ mask_has_loop(struct lp_exec_mask *mask)
  * no switch in the current function, but we were inside
  * a switch inside another function, from which this one was called.
  */
-static inline bool
+static inline boolean
 mask_has_switch(struct lp_exec_mask *mask)
 {
    int i;
    for (i = mask->function_stack_size - 1; i >= 0; --i) {
       const struct function_ctx *ctx = &mask->function_stack[i];
       if (ctx->switch_stack_size > 0)
-         return true;
+         return TRUE;
    }
-   return false;
+   return FALSE;
 }
 
 /*
@@ -88,25 +87,25 @@ mask_has_switch(struct lp_exec_mask *mask)
  * no conditional in the current function, but we were inside
  * a conditional inside another function, from which this one was called.
  */
-static inline bool
+static inline boolean
 mask_has_cond(struct lp_exec_mask *mask)
 {
    int i;
    for (i = mask->function_stack_size - 1; i >= 0; --i) {
       const struct function_ctx *ctx = &mask->function_stack[i];
       if (ctx->cond_stack_size > 0)
-         return true;
+         return TRUE;
    }
-   return false;
+   return FALSE;
 }
 
 void lp_exec_mask_update(struct lp_exec_mask *mask)
 {
    LLVMBuilderRef builder = mask->bld->gallivm->builder;
-   bool has_loop_mask = mask_has_loop(mask);
-   bool has_cond_mask = mask_has_cond(mask);
-   bool has_switch_mask = mask_has_switch(mask);
-   bool has_ret_mask = mask->function_stack_size > 1 ||
+   boolean has_loop_mask = mask_has_loop(mask);
+   boolean has_cond_mask = mask_has_cond(mask);
+   boolean has_switch_mask = mask_has_switch(mask);
+   boolean has_ret_mask = mask->function_stack_size > 1 ||
          mask->ret_in_main;
 
    if (has_loop_mask) {
@@ -114,8 +113,8 @@ void lp_exec_mask_update(struct lp_exec_mask *mask)
       LLVMValueRef tmp;
       assert(mask->break_mask);
       tmp = LLVMBuildAnd(builder,
-                         LLVMBuildLoad2(builder, mask->int_vec_type, mask->cont_mask, ""),
-                         LLVMBuildLoad2(builder, mask->int_vec_type, mask->break_mask, ""),
+                         mask->cont_mask,
+                         mask->break_mask,
                          "maskcb");
       mask->exec_mask = LLVMBuildAnd(builder,
                                      mask->cond_mask,
@@ -174,21 +173,15 @@ lp_exec_mask_function_init(struct lp_exec_mask *mask, int function_idx)
 void lp_exec_mask_init(struct lp_exec_mask *mask, struct lp_build_context *bld)
 {
    mask->bld = bld;
-   mask->has_mask = false;
-   mask->ret_in_main = false;
+   mask->has_mask = FALSE;
+   mask->ret_in_main = FALSE;
    /* For the main function */
    mask->function_stack_size = 1;
 
    mask->int_vec_type = lp_build_int_vec_type(bld->gallivm, mask->bld->type);
-   mask->exec_mask = mask->ret_mask =
+   mask->exec_mask = mask->ret_mask = mask->break_mask = mask->cont_mask =
          mask->cond_mask = mask->switch_mask =
          LLVMConstAllOnes(mask->int_vec_type);
-
-   mask->break_mask = lp_build_alloca(mask->bld->gallivm, mask->int_vec_type, "break_mask");
-   LLVMBuildStore(bld->gallivm->builder, LLVMConstAllOnes(mask->int_vec_type), mask->break_mask);
-
-   mask->cont_mask = lp_build_alloca(mask->bld->gallivm, mask->int_vec_type, "cont_mask");
-   LLVMBuildStore(bld->gallivm->builder, LLVMConstAllOnes(mask->int_vec_type), mask->cont_mask);
 
    mask->function_stack = CALLOC(LP_MAX_NUM_FUNCS,
                                  sizeof(mask->function_stack[0]));
@@ -238,7 +231,7 @@ void lp_exec_bgnloop_post_phi(struct lp_exec_mask *mask)
    struct function_ctx *ctx = func_ctx(mask);
 
    if (ctx->loop_stack_size != ctx->bgnloop_stack_size) {
-      LLVMBuildStore(builder, LLVMBuildLoad2(builder, mask->int_vec_type, ctx->break_var, ""), mask->break_mask);
+      mask->break_mask = LLVMBuildLoad2(builder, mask->int_vec_type, ctx->break_var, "");
       lp_exec_mask_update(mask);
       ctx->bgnloop_stack_size = ctx->loop_stack_size;
    }
@@ -264,22 +257,13 @@ void lp_exec_bgnloop(struct lp_exec_mask *mask, bool load)
    ctx->loop_stack[ctx->loop_stack_size].break_var = ctx->break_var;
    ++ctx->loop_stack_size;
 
-   LLVMValueRef cont_mask = LLVMBuildLoad2(builder, mask->int_vec_type, mask->cont_mask, "");
-   LLVMValueRef break_mask = LLVMBuildLoad2(builder, mask->int_vec_type, mask->break_mask, "");
-
-   mask->break_mask = lp_build_alloca(mask->bld->gallivm, mask->int_vec_type, "");
-   LLVMBuildStore(builder, break_mask, mask->break_mask);
-
    ctx->break_var = lp_build_alloca(mask->bld->gallivm, mask->int_vec_type, "");
-   LLVMBuildStore(builder, break_mask, ctx->break_var);
+   LLVMBuildStore(builder, mask->break_mask, ctx->break_var);
 
    ctx->loop_block = lp_build_insert_new_block(mask->bld->gallivm, "bgnloop");
 
    LLVMBuildBr(builder, ctx->loop_block);
    LLVMPositionBuilderAtEnd(builder, ctx->loop_block);
-
-   mask->cont_mask = lp_build_alloca(mask->bld->gallivm, mask->int_vec_type, "");
-   LLVMBuildStore(builder, cont_mask, mask->cont_mask);
 
    if (load) {
       lp_exec_bgnloop_post_phi(mask);
@@ -287,17 +271,18 @@ void lp_exec_bgnloop(struct lp_exec_mask *mask, bool load)
 }
 
 void lp_exec_endloop(struct gallivm_state *gallivm,
-                     struct lp_exec_mask *exec_mask,
-                     struct lp_build_mask_context *mask)
+                     struct lp_exec_mask *mask)
 {
-   LLVMBuilderRef builder = exec_mask->bld->gallivm->builder;
-   struct function_ctx *ctx = func_ctx(exec_mask);
+   LLVMBuilderRef builder = mask->bld->gallivm->builder;
+   struct function_ctx *ctx = func_ctx(mask);
    LLVMBasicBlockRef endloop;
-   LLVMTypeRef int_type = LLVMInt32TypeInContext(exec_mask->bld->gallivm->context);
-   LLVMTypeRef mask_type = LLVMIntTypeInContext(exec_mask->bld->gallivm->context, exec_mask->bld->type.length);
+   LLVMTypeRef int_type = LLVMInt32TypeInContext(mask->bld->gallivm->context);
+   LLVMTypeRef reg_type = LLVMIntTypeInContext(gallivm->context,
+                                               mask->bld->type.width *
+                                               mask->bld->type.length);
    LLVMValueRef i1cond, i2cond, icond, limiter;
 
-   assert(exec_mask->break_mask);
+   assert(mask->break_mask);
 
    assert(ctx->loop_stack_size);
    if (ctx->loop_stack_size > LP_MAX_TGSI_NESTING) {
@@ -309,14 +294,14 @@ void lp_exec_endloop(struct gallivm_state *gallivm,
    /*
     * Restore the cont_mask, but don't pop
     */
-   exec_mask->cont_mask = ctx->loop_stack[ctx->loop_stack_size - 1].cont_mask;
-   lp_exec_mask_update(exec_mask);
+   mask->cont_mask = ctx->loop_stack[ctx->loop_stack_size - 1].cont_mask;
+   lp_exec_mask_update(mask);
 
    /*
     * Unlike the continue mask, the break_mask must be preserved across loop
     * iterations
     */
-   LLVMBuildStore(builder, LLVMBuildLoad2(builder, exec_mask->int_vec_type, exec_mask->break_mask, ""), ctx->break_var);
+   LLVMBuildStore(builder, mask->break_mask, ctx->break_var);
 
    /* Decrement the loop limiter */
    limiter = LLVMBuildLoad2(builder, int_type, ctx->loop_limiter, "");
@@ -329,18 +314,12 @@ void lp_exec_endloop(struct gallivm_state *gallivm,
 
    LLVMBuildStore(builder, limiter, ctx->loop_limiter);
 
-   LLVMValueRef end_mask = exec_mask->exec_mask;
-   if (mask)
-      end_mask = LLVMBuildAnd(builder, exec_mask->exec_mask, lp_build_mask_value(mask), "");
-   end_mask = LLVMBuildICmp(builder, LLVMIntNE, end_mask, lp_build_zero(gallivm, exec_mask->bld->type), "");
-   end_mask = LLVMBuildBitCast(builder, end_mask, mask_type, "");
-
-   /* i1cond = (end_mask != 0) */
+   /* i1cond = (mask != 0) */
    i1cond = LLVMBuildICmp(
       builder,
       LLVMIntNE,
-      end_mask,
-      LLVMConstNull(mask_type), "i1cond");
+      LLVMBuildBitCast(builder, mask->exec_mask, reg_type, ""),
+      LLVMConstNull(reg_type), "i1cond");
 
    /* i2cond = (looplimiter > 0) */
    i2cond = LLVMBuildICmp(
@@ -352,7 +331,7 @@ void lp_exec_endloop(struct gallivm_state *gallivm,
    /* if( i1cond && i2cond ) */
    icond = LLVMBuildAnd(builder, i1cond, i2cond, "");
 
-   endloop = lp_build_insert_new_block(exec_mask->bld->gallivm, "endloop");
+   endloop = lp_build_insert_new_block(mask->bld->gallivm, "endloop");
 
    LLVMBuildCondBr(builder,
                    icond, ctx->loop_block, endloop);
@@ -362,14 +341,14 @@ void lp_exec_endloop(struct gallivm_state *gallivm,
    assert(ctx->loop_stack_size);
    --ctx->loop_stack_size;
    --ctx->bgnloop_stack_size;
-   exec_mask->cont_mask = ctx->loop_stack[ctx->loop_stack_size].cont_mask;
-   exec_mask->break_mask = ctx->loop_stack[ctx->loop_stack_size].break_mask;
+   mask->cont_mask = ctx->loop_stack[ctx->loop_stack_size].cont_mask;
+   mask->break_mask = ctx->loop_stack[ctx->loop_stack_size].break_mask;
    ctx->loop_block = ctx->loop_stack[ctx->loop_stack_size].loop_block;
    ctx->break_var = ctx->loop_stack[ctx->loop_stack_size].break_var;
    ctx->break_type = ctx->break_type_stack[ctx->loop_stack_size +
          ctx->switch_stack_size];
 
-   lp_exec_mask_update(exec_mask);
+   lp_exec_mask_update(mask);
 }
 
 void lp_exec_mask_cond_push(struct lp_exec_mask *mask,
@@ -436,9 +415,9 @@ void lp_exec_continue(struct lp_exec_mask *mask)
                                          mask->exec_mask,
                                          "");
 
-   LLVMBuildStore(builder, LLVMBuildAnd(builder,
-                                  LLVMBuildLoad2(builder, mask->int_vec_type, mask->cont_mask, ""),
-                                  exec_mask, ""), mask->cont_mask);
+   mask->cont_mask = LLVMBuildAnd(builder,
+                                  mask->cont_mask,
+                                  exec_mask, "");
 
    lp_exec_mask_update(mask);
 }
@@ -454,9 +433,9 @@ void lp_exec_break(struct lp_exec_mask *mask, int *pc,
                                             mask->exec_mask,
                                             "break");
 
-      LLVMBuildStore(builder, LLVMBuildAnd(builder,
-                                      LLVMBuildLoad2(builder, mask->int_vec_type, mask->break_mask, ""),
-                                      exec_mask, "break_full"), mask->break_mask);
+      mask->break_mask = LLVMBuildAnd(builder,
+                                      mask->break_mask,
+                                      exec_mask, "break_full");
    }
    else {
       if (ctx->switch_in_default) {

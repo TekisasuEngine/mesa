@@ -54,10 +54,6 @@ static const struct debug_named_value debug_control[] = {
           "Dump NIR during program compile" },
         { "tgsi",        V3D_DEBUG_TGSI,
           "Dump TGSI during program compile (v3d only)" },
-        /* `shaderdb` is *not* used by shader-db, but is here so that any other
-         * game/app can dump its stats in the shader-db format, allowing them
-         * to be compared using shader-db's report.py tool.
-         */
         { "shaderdb",    V3D_DEBUG_SHADERDB,
           "Dump program compile information for shader-db analysis" },
         { "surface",     V3D_DEBUG_SURFACE,
@@ -82,6 +78,8 @@ static const struct debug_named_value debug_control[] = {
           "Precompiles shader variant at shader state creation time (v3d only)" },
         { "ra",          V3D_DEBUG_RA,
           "Dump register allocation failures" },
+        { "dump_spirv",  V3D_DEBUG_DUMP_SPIRV,
+          "Dump SPIR-V code (v3dv only)" },
         { "tmu32",  V3D_DEBUG_TMU_32BIT,
           "Force 32-bit precision on all TMU operations" },
         /* This can lead to incorrect behavior for applications that do

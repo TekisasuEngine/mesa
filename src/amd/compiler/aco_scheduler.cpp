@@ -1,7 +1,25 @@
 /*
  * Copyright © 2018 Valve Corporation
  *
- * SPDX-License-Identifier: MIT
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ *
  */
 
 #include "aco_builder.h"
@@ -15,20 +33,14 @@
 
 #define SMEM_WINDOW_SIZE    (350 - ctx.num_waves * 35)
 #define VMEM_WINDOW_SIZE    (1024 - ctx.num_waves * 64)
-#define LDS_WINDOW_SIZE     64
 #define POS_EXP_WINDOW_SIZE 512
 #define SMEM_MAX_MOVES      (64 - ctx.num_waves * 4)
 #define VMEM_MAX_MOVES      (256 - ctx.num_waves * 16)
-#define LDSDIR_MAX_MOVES    10
-#define LDS_MAX_MOVES       32
 /* creating clauses decreases def-use distances, so make it less aggressive the lower num_waves is */
 #define VMEM_CLAUSE_MAX_GRAB_DIST (ctx.num_waves * 2)
-#define VMEM_STORE_CLAUSE_MAX_GRAB_DIST (ctx.num_waves * 4)
 #define POS_EXP_MAX_MOVES         512
 
 namespace aco {
-
-namespace {
 
 enum MoveResult {
    move_success,
@@ -58,7 +70,7 @@ struct DownwardsCursor {
          clause_demand(initial_clause_demand)
    {}
 
-   void verify_invariants(const Block* block);
+   void verify_invariants(const RegisterDemand* register_demand);
 };
 
 /**
@@ -78,7 +90,7 @@ struct UpwardsCursor {
    }
 
    bool has_insert_idx() const { return insert_idx != -1; }
-   void verify_invariants(const Block* block);
+   void verify_invariants(const RegisterDemand* register_demand);
 };
 
 struct MoveState {
@@ -86,6 +98,7 @@ struct MoveState {
 
    Block* block;
    Instruction* current;
+   RegisterDemand* register_demand; /* demand per instruction */
    bool improved_rar;
 
    std::vector<bool> depends_on;
@@ -144,7 +157,7 @@ move_element(T begin_it, size_t idx, size_t before)
 }
 
 void
-DownwardsCursor::verify_invariants(const Block* block)
+DownwardsCursor::verify_invariants(const RegisterDemand* register_demand)
 {
    assert(source_idx < insert_idx_clause);
    assert(insert_idx_clause < insert_idx);
@@ -152,13 +165,13 @@ DownwardsCursor::verify_invariants(const Block* block)
 #ifndef NDEBUG
    RegisterDemand reference_demand;
    for (int i = source_idx + 1; i < insert_idx_clause; ++i) {
-      reference_demand.update(block->instructions[i]->register_demand);
+      reference_demand.update(register_demand[i]);
    }
    assert(total_demand == reference_demand);
 
    reference_demand = {};
    for (int i = insert_idx_clause; i < insert_idx; ++i) {
-      reference_demand.update(block->instructions[i]->register_demand);
+      reference_demand.update(register_demand[i]);
    }
    assert(clause_demand == reference_demand);
 #endif
@@ -184,8 +197,8 @@ MoveState::downwards_init(int current_idx, bool improved_rar_, bool may_form_cla
       }
    }
 
-   DownwardsCursor cursor(current_idx, block->instructions[current_idx]->register_demand);
-   cursor.verify_invariants(block);
+   DownwardsCursor cursor(current_idx, register_demand[current_idx]);
+   cursor.verify_invariants(register_demand);
    return cursor;
 }
 
@@ -228,15 +241,14 @@ MoveState::downwards_move(DownwardsCursor& cursor, bool add_to_clause)
    }
 
    /* Check the new demand of the instructions being moved over */
-   const RegisterDemand candidate_diff = get_live_changes(instr.get());
+   const RegisterDemand candidate_diff = get_live_changes(instr);
    if (RegisterDemand(register_pressure - candidate_diff).exceeds(max_registers))
       return move_fail_pressure;
 
    /* New demand for the moved instruction */
-   const RegisterDemand temp = get_temp_registers(instr.get());
-   const RegisterDemand temp2 = get_temp_registers(block->instructions[dest_insert_idx - 1].get());
-   const RegisterDemand new_demand =
-      block->instructions[dest_insert_idx - 1]->register_demand - temp2 + temp;
+   const RegisterDemand temp = get_temp_registers(instr);
+   const RegisterDemand temp2 = get_temp_registers(block->instructions[dest_insert_idx - 1]);
+   const RegisterDemand new_demand = register_demand[dest_insert_idx - 1] - temp2 + temp;
    if (new_demand.exceeds(max_registers))
       return move_fail_pressure;
 
@@ -244,9 +256,10 @@ MoveState::downwards_move(DownwardsCursor& cursor, bool add_to_clause)
    move_element(block->instructions.begin(), cursor.source_idx, dest_insert_idx);
 
    /* update register pressure */
+   move_element(register_demand, cursor.source_idx, dest_insert_idx);
    for (int i = cursor.source_idx; i < dest_insert_idx - 1; i++)
-      block->instructions[i]->register_demand -= candidate_diff;
-   block->instructions[dest_insert_idx - 1]->register_demand = new_demand;
+      register_demand[i] -= candidate_diff;
+   register_demand[dest_insert_idx - 1] = new_demand;
    cursor.insert_idx_clause--;
    if (cursor.source_idx != cursor.insert_idx_clause) {
       /* Update demand if we moved over any instructions before the clause */
@@ -262,7 +275,7 @@ MoveState::downwards_move(DownwardsCursor& cursor, bool add_to_clause)
    }
 
    cursor.source_idx--;
-   cursor.verify_invariants(block);
+   cursor.verify_invariants(register_demand);
    return move_success;
 }
 
@@ -280,13 +293,13 @@ MoveState::downwards_skip(DownwardsCursor& cursor)
          }
       }
    }
-   cursor.total_demand.update(instr->register_demand);
+   cursor.total_demand.update(register_demand[cursor.source_idx]);
    cursor.source_idx--;
-   cursor.verify_invariants(block);
+   cursor.verify_invariants(register_demand);
 }
 
 void
-UpwardsCursor::verify_invariants(const Block* block)
+UpwardsCursor::verify_invariants(const RegisterDemand* register_demand)
 {
 #ifndef NDEBUG
    if (!has_insert_idx()) {
@@ -297,7 +310,7 @@ UpwardsCursor::verify_invariants(const Block* block)
 
    RegisterDemand reference_demand;
    for (int i = insert_idx; i < source_idx; ++i) {
-      reference_demand.update(block->instructions[i]->register_demand);
+      reference_demand.update(register_demand[i]);
    }
    assert(total_demand == reference_demand);
 #endif
@@ -334,7 +347,7 @@ void
 MoveState::upwards_update_insert_idx(UpwardsCursor& cursor)
 {
    cursor.insert_idx = cursor.source_idx;
-   cursor.total_demand = block->instructions[cursor.insert_idx]->register_demand;
+   cursor.total_demand = register_demand[cursor.insert_idx];
 }
 
 MoveResult
@@ -356,14 +369,13 @@ MoveState::upwards_move(UpwardsCursor& cursor)
 
    /* check if register pressure is low enough: the diff is negative if register pressure is
     * decreased */
-   const RegisterDemand candidate_diff = get_live_changes(instr.get());
-   const RegisterDemand temp = get_temp_registers(instr.get());
+   const RegisterDemand candidate_diff = get_live_changes(instr);
+   const RegisterDemand temp = get_temp_registers(instr);
    if (RegisterDemand(cursor.total_demand + candidate_diff).exceeds(max_registers))
       return move_fail_pressure;
-   const RegisterDemand temp2 =
-      get_temp_registers(block->instructions[cursor.insert_idx - 1].get());
+   const RegisterDemand temp2 = get_temp_registers(block->instructions[cursor.insert_idx - 1]);
    const RegisterDemand new_demand =
-      block->instructions[cursor.insert_idx - 1]->register_demand - temp2 + candidate_diff + temp;
+      register_demand[cursor.insert_idx - 1] - temp2 + candidate_diff + temp;
    if (new_demand.exceeds(max_registers))
       return move_fail_pressure;
 
@@ -371,17 +383,18 @@ MoveState::upwards_move(UpwardsCursor& cursor)
    move_element(block->instructions.begin(), cursor.source_idx, cursor.insert_idx);
 
    /* update register pressure */
-   block->instructions[cursor.insert_idx]->register_demand = new_demand;
+   move_element(register_demand, cursor.source_idx, cursor.insert_idx);
+   register_demand[cursor.insert_idx] = new_demand;
    for (int i = cursor.insert_idx + 1; i <= cursor.source_idx; i++)
-      block->instructions[i]->register_demand += candidate_diff;
+      register_demand[i] += candidate_diff;
    cursor.total_demand += candidate_diff;
 
-   cursor.total_demand.update(block->instructions[cursor.source_idx]->register_demand);
+   cursor.total_demand.update(register_demand[cursor.source_idx]);
 
    cursor.insert_idx++;
    cursor.source_idx++;
 
-   cursor.verify_invariants(block);
+   cursor.verify_invariants(register_demand);
 
    return move_success;
 }
@@ -399,30 +412,20 @@ MoveState::upwards_skip(UpwardsCursor& cursor)
          if (op.isTemp())
             RAR_dependencies[op.tempId()] = true;
       }
-      cursor.total_demand.update(instr->register_demand);
+      cursor.total_demand.update(register_demand[cursor.source_idx]);
    }
 
    cursor.source_idx++;
 
-   cursor.verify_invariants(block);
+   cursor.verify_invariants(register_demand);
 }
 
 bool
 is_done_sendmsg(amd_gfx_level gfx_level, const Instruction* instr)
 {
    if (gfx_level <= GFX10_3 && instr->opcode == aco_opcode::s_sendmsg)
-      return (instr->salu().imm & sendmsg_id_mask) == sendmsg_gs_done;
+      return (instr->sopp().imm & sendmsg_id_mask) == _sendmsg_gs_done;
    return false;
-}
-
-bool
-is_pos_prim_export(amd_gfx_level gfx_level, const Instruction* instr)
-{
-   /* Because of NO_PC_EXPORT=1, a done=1 position or primitive export can launch PS waves before
-    * the NGG/VS wave finishes if there are no parameter exports.
-    */
-   return instr->opcode == aco_opcode::exp && instr->exp().dest >= V_008DFC_SQ_EXP_POS &&
-          instr->exp().dest <= V_008DFC_SQ_EXP_PRIM && gfx_level >= GFX10;
 }
 
 memory_sync_info
@@ -480,7 +483,6 @@ add_memory_event(amd_gfx_level gfx_level, memory_event_set* set, Instruction* in
                  memory_sync_info* sync)
 {
    set->has_control_barrier |= is_done_sendmsg(gfx_level, instr);
-   set->has_control_barrier |= is_pos_prim_export(gfx_level, instr);
    if (instr->opcode == aco_opcode::p_barrier) {
       Pseudo_barrier_instruction& bar = instr->barrier();
       if (bar.sync.semantics & semantic_acquire)
@@ -558,20 +560,6 @@ perform_hazard_query(hazard_query* query, Instruction* instr, bool upwards)
    if (!upwards && instr->opcode == aco_opcode::p_exit_early_if)
       return hazard_fail_unreorderable;
 
-   /* In Primitive Ordered Pixel Shading, await overlapped waves as late as possible, and notify
-    * overlapping waves that they can continue execution as early as possible.
-    */
-   if (upwards) {
-      if (instr->opcode == aco_opcode::p_pops_gfx9_add_exiting_wave_id ||
-          is_wait_export_ready(query->gfx_level, instr)) {
-         return hazard_fail_unreorderable;
-      }
-   } else {
-      if (instr->opcode == aco_opcode::p_pops_gfx9_ordered_section_done) {
-         return hazard_fail_unreorderable;
-      }
-   }
-
    if (query->uses_exec || query->writes_exec) {
       for (const Definition& def : instr->definitions) {
          if (def.isFixed() && def.physReg() == exec)
@@ -581,28 +569,15 @@ perform_hazard_query(hazard_query* query, Instruction* instr, bool upwards)
    if (query->writes_exec && needs_exec_mask(instr))
       return hazard_fail_exec;
 
-   /* Don't move exports so that they stay closer together.
-    * Since GFX11, export order matters. MRTZ must come first,
-    * then color exports sorted from first to last.
-    * Also, with Primitive Ordered Pixel Shading on GFX11+, the `done` export must not be moved
-    * above the memory accesses before the queue family scope (more precisely, fragment interlock
-    * scope, but it's not available in ACO) release barrier that is expected to be inserted before
-    * the export, as well as before any `s_wait_event export_ready` which enters the ordered
-    * section, because the `done` export exits the ordered section.
-    */
-   if (instr->isEXP() || instr->opcode == aco_opcode::p_dual_src_export_gfx11)
+   /* don't move exports so that they stay closer together */
+   if (instr->isEXP())
       return hazard_fail_export;
 
    /* don't move non-reorderable instructions */
    if (instr->opcode == aco_opcode::s_memtime || instr->opcode == aco_opcode::s_memrealtime ||
        instr->opcode == aco_opcode::s_setprio || instr->opcode == aco_opcode::s_getreg_b32 ||
-       instr->opcode == aco_opcode::p_shader_cycles_hi_lo_hi ||
-       instr->opcode == aco_opcode::p_init_scratch ||
-       instr->opcode == aco_opcode::p_jump_to_epilog ||
-       instr->opcode == aco_opcode::s_sendmsg_rtn_b32 ||
-       instr->opcode == aco_opcode::s_sendmsg_rtn_b64 ||
-       instr->opcode == aco_opcode::p_end_with_regs || instr->opcode == aco_opcode::s_nop ||
-       instr->opcode == aco_opcode::s_sleep || instr->opcode == aco_opcode::s_trap)
+       instr->opcode == aco_opcode::p_init_scratch || instr->opcode == aco_opcode::p_jump_to_epilog ||
+       instr->opcode == aco_opcode::s_sendmsg_rtn_b32 || instr->opcode == aco_opcode::s_sendmsg_rtn_b64)
       return hazard_fail_unreorderable;
 
    memory_event_set instr_set;
@@ -667,36 +642,9 @@ perform_hazard_query(hazard_query* query, Instruction* instr, bool upwards)
    return hazard_success;
 }
 
-unsigned
-get_likely_cost(Instruction* instr)
-{
-   if (instr->opcode == aco_opcode::p_split_vector ||
-       instr->opcode == aco_opcode::p_extract_vector) {
-      unsigned cost = 0;
-      for (Definition def : instr->definitions) {
-         if (instr->operands[0].isKill() &&
-             def.regClass().type() == instr->operands[0].regClass().type())
-            continue;
-         cost += def.size();
-      }
-      return cost;
-   } else if (instr->opcode == aco_opcode::p_create_vector) {
-      unsigned cost = 0;
-      for (Operand op : instr->operands) {
-         if (op.isTemp() && op.isFirstKill() &&
-             op.regClass().type() == instr->definitions[0].regClass().type())
-            continue;
-         cost += op.size();
-      }
-      return cost;
-   } else {
-      /* For the moment, just assume the same cost for all other instructions. */
-      return 1;
-   }
-}
-
 void
-schedule_SMEM(sched_ctx& ctx, Block* block, Instruction* current, int idx)
+schedule_SMEM(sched_ctx& ctx, Block* block, std::vector<RegisterDemand>& register_demand,
+              Instruction* current, int idx)
 {
    assert(idx != 0);
    int window_size = SMEM_WINDOW_SIZE;
@@ -704,7 +652,8 @@ schedule_SMEM(sched_ctx& ctx, Block* block, Instruction* current, int idx)
    int16_t k = 0;
 
    /* don't move s_memtime/s_memrealtime */
-   if (current->opcode == aco_opcode::s_memtime || current->opcode == aco_opcode::s_memrealtime ||
+   if (current->opcode == aco_opcode::s_memtime ||
+       current->opcode == aco_opcode::s_memrealtime ||
        current->opcode == aco_opcode::s_sendmsg_rtn_b32 ||
        current->opcode == aco_opcode::s_sendmsg_rtn_b64)
       return;
@@ -753,7 +702,7 @@ schedule_SMEM(sched_ctx& ctx, Block* block, Instruction* current, int idx)
          break;
 
       /* don't use LDS/GDS instructions to hide latency since it can
-       * significantly worsen LDS scheduling */
+       * significanly worsen LDS scheduling */
       if (candidate->isDS() || !can_move_down) {
          add_to_hazard_query(&hq, candidate.get());
          ctx.mv.downwards_skip(cursor);
@@ -840,7 +789,8 @@ schedule_SMEM(sched_ctx& ctx, Block* block, Instruction* current, int idx)
 }
 
 void
-schedule_VMEM(sched_ctx& ctx, Block* block, Instruction* current, int idx)
+schedule_VMEM(sched_ctx& ctx, Block* block, std::vector<RegisterDemand>& register_demand,
+              Instruction* current, int idx)
 {
    assert(idx != 0);
    int window_size = VMEM_WINDOW_SIZE;
@@ -1011,85 +961,8 @@ schedule_VMEM(sched_ctx& ctx, Block* block, Instruction* current, int idx)
 }
 
 void
-schedule_LDS(sched_ctx& ctx, Block* block, Instruction* current, int idx)
-{
-   assert(idx != 0);
-   int window_size = LDS_WINDOW_SIZE;
-   int max_moves = current->isLDSDIR() ? LDSDIR_MAX_MOVES : LDS_MAX_MOVES;
-   int16_t k = 0;
-
-   /* first, check if we have instructions before current to move down */
-   hazard_query hq;
-   init_hazard_query(ctx, &hq);
-   add_to_hazard_query(&hq, current);
-
-   DownwardsCursor cursor = ctx.mv.downwards_init(idx, true, false);
-
-   for (int i = 0; k < max_moves && i < window_size; i++) {
-      aco_ptr<Instruction>& candidate = block->instructions[cursor.source_idx];
-      bool is_mem = candidate->isVMEM() || candidate->isFlatLike() || candidate->isSMEM();
-      if (candidate->opcode == aco_opcode::p_logical_start || is_mem)
-         break;
-
-      if (candidate->isDS() || candidate->isLDSDIR()) {
-         add_to_hazard_query(&hq, candidate.get());
-         ctx.mv.downwards_skip(cursor);
-         continue;
-      }
-
-      if (perform_hazard_query(&hq, candidate.get(), false) != hazard_success ||
-          ctx.mv.downwards_move(cursor, false) != move_success)
-         break;
-
-      k++;
-   }
-
-   /* second, check if we have instructions after current to move up */
-   bool found_dependency = false;
-   int i = 0;
-   UpwardsCursor up_cursor = ctx.mv.upwards_init(idx + 1, true);
-   /* find the first instruction depending on current */
-   for (; k < max_moves && i < window_size; i++) {
-      aco_ptr<Instruction>& candidate = block->instructions[up_cursor.source_idx];
-      bool is_mem = candidate->isVMEM() || candidate->isFlatLike() || candidate->isSMEM();
-      if (candidate->opcode == aco_opcode::p_logical_end || is_mem)
-         break;
-
-      /* check if candidate depends on current */
-      if (!ctx.mv.upwards_check_deps(up_cursor)) {
-         init_hazard_query(ctx, &hq);
-         add_to_hazard_query(&hq, candidate.get());
-         ctx.mv.upwards_update_insert_idx(up_cursor);
-         ctx.mv.upwards_skip(up_cursor);
-         found_dependency = true;
-         i++;
-         break;
-      }
-
-      ctx.mv.upwards_skip(up_cursor);
-   }
-
-   for (; found_dependency && k < max_moves && i < window_size; i++) {
-      aco_ptr<Instruction>& candidate = block->instructions[up_cursor.source_idx];
-      bool is_mem = candidate->isVMEM() || candidate->isFlatLike() || candidate->isSMEM();
-      if (candidate->opcode == aco_opcode::p_logical_end || is_mem)
-         break;
-
-      HazardResult haz = perform_hazard_query(&hq, candidate.get(), true);
-      if (haz == hazard_fail_exec || haz == hazard_fail_unreorderable)
-         break;
-
-      if (haz != hazard_success || ctx.mv.upwards_move(up_cursor) != move_success) {
-         add_to_hazard_query(&hq, candidate.get());
-         ctx.mv.upwards_skip(up_cursor);
-      } else {
-         k++;
-      }
-   }
-}
-
-void
-schedule_position_export(sched_ctx& ctx, Block* block, Instruction* current, int idx)
+schedule_position_export(sched_ctx& ctx, Block* block, std::vector<RegisterDemand>& register_demand,
+                         Instruction* current, int idx)
 {
    assert(idx != 0);
    int window_size = POS_EXP_WINDOW_SIZE / ctx.schedule_pos_export_div;
@@ -1134,103 +1007,50 @@ schedule_position_export(sched_ctx& ctx, Block* block, Instruction* current, int
    }
 }
 
-unsigned
-schedule_VMEM_store(sched_ctx& ctx, Block* block, Instruction* current, int idx)
-{
-   hazard_query hq;
-   init_hazard_query(ctx, &hq);
-
-   DownwardsCursor cursor = ctx.mv.downwards_init(idx, true, true);
-   int skip = 0;
-
-   for (int16_t k = 0; k < VMEM_STORE_CLAUSE_MAX_GRAB_DIST;) {
-      aco_ptr<Instruction>& candidate = block->instructions[cursor.source_idx];
-      if (candidate->opcode == aco_opcode::p_logical_start)
-         break;
-
-      if (!should_form_clause(current, candidate.get())) {
-         add_to_hazard_query(&hq, candidate.get());
-         ctx.mv.downwards_skip(cursor);
-         k += get_likely_cost(candidate.get());
-         continue;
-      }
-
-      if (perform_hazard_query(&hq, candidate.get(), false) != hazard_success ||
-          ctx.mv.downwards_move(cursor, true) != move_success)
-         break;
-
-      skip++;
-   }
-
-   return skip;
-}
-
 void
-schedule_block(sched_ctx& ctx, Program* program, Block* block)
+schedule_block(sched_ctx& ctx, Program* program, Block* block, live& live_vars)
 {
    ctx.last_SMEM_dep_idx = 0;
    ctx.last_SMEM_stall = INT16_MIN;
    ctx.mv.block = block;
+   ctx.mv.register_demand = live_vars.register_demand[block->index].data();
 
    /* go through all instructions and find memory loads */
-   unsigned num_stores = 0;
    for (unsigned idx = 0; idx < block->instructions.size(); idx++) {
       Instruction* current = block->instructions[idx].get();
-
-      if (current->opcode == aco_opcode::p_logical_end)
-         break;
 
       if (block->kind & block_kind_export_end && current->isEXP() && ctx.schedule_pos_exports) {
          unsigned target = current->exp().dest;
          if (target >= V_008DFC_SQ_EXP_POS && target < V_008DFC_SQ_EXP_PRIM) {
             ctx.mv.current = current;
-            schedule_position_export(ctx, block, current, idx);
+            schedule_position_export(ctx, block, live_vars.register_demand[block->index], current,
+                                     idx);
          }
       }
 
-      if (current->definitions.empty()) {
-         num_stores += current->isVMEM() || current->isFlatLike() ? 1 : 0;
+      if (current->definitions.empty())
          continue;
-      }
 
       if (current->isVMEM() || current->isFlatLike()) {
          ctx.mv.current = current;
-         schedule_VMEM(ctx, block, current, idx);
+         schedule_VMEM(ctx, block, live_vars.register_demand[block->index], current, idx);
       }
 
       if (current->isSMEM()) {
          ctx.mv.current = current;
-         schedule_SMEM(ctx, block, current, idx);
-      }
-
-      if (current->isLDSDIR() || (current->isDS() && !current->ds().gds)) {
-         ctx.mv.current = current;
-         schedule_LDS(ctx, block, current, idx);
-      }
-   }
-
-   /* GFX11 benefits from creating VMEM store clauses. */
-   if (num_stores > 1 && program->gfx_level >= GFX11) {
-      for (int idx = block->instructions.size() - 1; idx >= 0; idx--) {
-         Instruction* current = block->instructions[idx].get();
-         if (!current->definitions.empty() || !(current->isVMEM() || current->isFlatLike()))
-            continue;
-
-         ctx.mv.current = current;
-         idx -= schedule_VMEM_store(ctx, block, current, idx);
+         schedule_SMEM(ctx, block, live_vars.register_demand[block->index], current, idx);
       }
    }
 
    /* resummarize the block's register demand */
-   block->register_demand = block->live_in_demand;
-   for (const aco_ptr<Instruction>& instr : block->instructions)
-      block->register_demand.update(instr->register_demand);
+   block->register_demand = RegisterDemand();
+   for (unsigned idx = 0; idx < block->instructions.size(); idx++) {
+      block->register_demand.update(live_vars.register_demand[block->index][idx]);
+   }
 }
 
-} /* end namespace */
-
 void
-schedule_program(Program* program)
+schedule_program(Program* program, live& live_vars)
 {
    /* don't use program->max_reg_demand because that is affected by max_waves_per_simd */
    RegisterDemand demand;
@@ -1279,7 +1099,7 @@ schedule_program(Program* program)
    }
 
    for (Block& block : program->blocks)
-      schedule_block(ctx, program, &block);
+      schedule_block(ctx, program, &block, live_vars);
 
    /* update max_reg_demand and num_waves */
    RegisterDemand new_demand;
@@ -1288,9 +1108,28 @@ schedule_program(Program* program)
    }
    update_vgpr_sgpr_demand(program, new_demand);
 
-   /* Validate live variable information */
-   if (!validate_live_vars(program))
-      abort();
+/* if enabled, this code asserts that register_demand is updated correctly */
+#if 0
+   int prev_num_waves = program->num_waves;
+   const RegisterDemand prev_max_demand = program->max_reg_demand;
+
+   std::vector<RegisterDemand> demands(program->blocks.size());
+   for (unsigned j = 0; j < program->blocks.size(); j++) {
+      demands[j] = program->blocks[j].register_demand;
+   }
+
+   live live_vars2 = aco::live_var_analysis(program);
+
+   for (unsigned j = 0; j < program->blocks.size(); j++) {
+      Block &b = program->blocks[j];
+      for (unsigned i = 0; i < b.instructions.size(); i++)
+         assert(live_vars.register_demand[b.index][i] == live_vars2.register_demand[b.index][i]);
+      assert(b.register_demand == demands[j]);
+   }
+
+   assert(program->max_reg_demand == prev_max_demand);
+   assert(program->num_waves == prev_num_waves);
+#endif
 }
 
 } // namespace aco

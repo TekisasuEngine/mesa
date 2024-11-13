@@ -206,7 +206,6 @@ v3dv_bo_init(struct v3dv_bo *bo,
    bo->private = private;
    bo->dumb_handle = -1;
    bo->is_import = false;
-   bo->cl_branch_offset = 0xffffffff;
    list_inithead(&bo->list_link);
 }
 
@@ -340,7 +339,7 @@ v3dv_bo_map(struct v3dv_device *device, struct v3dv_bo *bo, uint32_t size)
    if (!ok)
       return false;
 
-   ok = v3dv_bo_wait(device, bo, OS_TIMEOUT_INFINITE);
+   ok = v3dv_bo_wait(device, bo, PIPE_TIMEOUT_INFINITE);
    if (!ok) {
       fprintf(stderr, "memory wait for map failed\n");
       return false;
@@ -360,7 +359,7 @@ v3dv_bo_unmap(struct v3dv_device *device, struct v3dv_bo *bo)
    bo->map_size = 0;
 }
 
-static bool
+static boolean
 reallocate_size_list(struct v3dv_bo_cache *cache,
                      struct v3dv_device *device,
                      uint32_t size)
@@ -420,11 +419,9 @@ v3dv_bo_cache_init(struct v3dv_device *device)
       fprintf(stderr, "MAX BO CACHE SIZE: %iMB\n", device->bo_cache.max_cache_size);
    }
 
-   mtx_lock(&device->bo_cache.lock);
    device->bo_cache.max_cache_size *= 1024 * 1024;
    device->bo_cache.cache_count = 0;
    device->bo_cache.cache_size = 0;
-   mtx_unlock(&device->bo_cache.lock);
 }
 
 void

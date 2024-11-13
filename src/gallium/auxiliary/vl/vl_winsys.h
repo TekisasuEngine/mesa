@@ -29,20 +29,14 @@
  * Target makefiles directly refer to vl_winsys_dri.c to avoid DRI dependency
  */
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #ifndef vl_winsys_h
 #define vl_winsys_h
 
 #ifdef HAVE_X11_PLATFORM
 #include <X11/Xlib.h>
-#include <xcb/xcb.h>
 #endif
 #ifdef _WIN32
 #include <windows.h>
-#include <unknwn.h>
 #endif
 #include "pipe/p_defines.h"
 #include "util/format/u_formats.h"
@@ -83,8 +77,6 @@ struct vl_screen
 };
 
 #ifdef HAVE_X11_PLATFORM
-xcb_screen_t *
-vl_dri_get_screen_for_root(xcb_connection_t *conn, xcb_window_t root);
 uint32_t
 vl_dri2_format_for_depth(struct vl_screen *vscreen, int depth);
 
@@ -95,26 +87,20 @@ static inline struct vl_screen *
 vl_dri2_screen_create(void *display, int screen) { return NULL; };
 #endif
 
-#if defined(HAVE_X11_PLATFORM) && defined(HAVE_LIBDRM)
+#if defined(HAVE_X11_PLATFORM) && defined(HAVE_DRI3)
 struct vl_screen *
 vl_dri3_screen_create(Display *display, int screen);
-struct vl_screen *
-vl_kopper_screen_create_x11(Display *display, int screen);
 #else
 static inline struct vl_screen *
 vl_dri3_screen_create(void *display, int screen) { return NULL; };
-static inline struct vl_screen *
-vl_kopper_screen_create_x11(void *display, int screen) { return NULL; };
 #endif
 
 #ifdef _WIN32
 struct vl_screen *vl_win32_screen_create(LUID *adapter);
-struct vl_screen *vl_win32_screen_create_from_d3d12_device(IUnknown* d3d12_device, struct sw_winsys* winsys);
-struct vl_screen *vl_kopper_screen_create_win32(LUID *adapter);
 #else
 /* Always enable the DRM vl winsys */
 struct vl_screen *
-vl_drm_screen_create(int fd, bool honor_dri_prime);
+vl_drm_screen_create(int fd);
 
 #ifdef USE_XSHM
 struct vl_screen *
@@ -129,7 +115,4 @@ vl_xlib_swrast_screen_create(void *display, int screen) { return NULL; }
 #endif
 #endif
 
-#endif
-#ifdef __cplusplus
-}
 #endif

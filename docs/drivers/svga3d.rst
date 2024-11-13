@@ -34,7 +34,8 @@ The components involved in this include:
 
 All of these components reside in the guest Linux virtual machine. On
 the host, all you're doing is running VMware
-`Fusion or Workstation <https://www.vmware.com/products/desktop-hypervisor/workstation-and-fusion>`__.
+`Workstation Pro <https://www.vmware.com/products/workstation-pro.html>`__ or
+`Fusion <https://www.vmware.com/products/fusion.html>`__.
 
 Prerequisites
 -------------
@@ -112,8 +113,8 @@ Building the Code
 
       cd $TOP/drm
       meson builddir --prefix=/usr --libdir=${LIBDIR}
-      meson compile -C builddir
-      sudo meson install -C builddir
+      ninja -C builddir
+      sudo ninja -C builddir install
         
 
 -  Build Mesa:
@@ -121,10 +122,10 @@ Building the Code
    ::
 
       cd $TOP/mesa
-      meson builddir -Dvulkan-drivers= -Dgallium-drivers=svga -Ddri-drivers= -Dglvnd=enabled -Dglvnd-vendor-name=mesa
+      meson builddir -Dvulkan-drivers= -Dgallium-drivers=svga -Ddri-drivers= -Dglvnd=true -Dglvnd-vendor-name=mesa
 
-      meson compile -C builddir
-      sudo meson install -C builddir
+      ninja -C builddir
+      sudo ninja -C builddir install
         
 
    Note that you may have to install other packages that Mesa depends

@@ -26,7 +26,11 @@
 
 #pragma once
 
+#ifndef _WIN32
 #include <wsl/winadapter.h>
+#else
+#include <unknwn.h>
+#endif
 
 #define D3D12_IGNORE_SDK_LAYERS
 #ifndef _GAMING_XBOX
@@ -52,7 +56,7 @@
 #endif /* D3D12_TEXTURE_DATA_PITCH_ALIGNMENT */
 
 #if defined(__cplusplus)
-#if !defined(_WIN32) || defined(_MSC_VER)
+#if !defined(_WIN32) || defined(_MSC_VER) || D3D12_SDK_VERSION < 606
 inline D3D12_CPU_DESCRIPTOR_HANDLE
 GetCPUDescriptorHandleForHeapStart(ID3D12DescriptorHeap *heap)
 {
@@ -62,11 +66,6 @@ inline D3D12_GPU_DESCRIPTOR_HANDLE
 GetGPUDescriptorHandleForHeapStart(ID3D12DescriptorHeap *heap)
 {
    return heap->GetGPUDescriptorHandleForHeapStart();
-}
-D3D12_HEAP_DESC
-inline GetDesc(ID3D12Heap* heap)
-{
-   return heap->GetDesc();
 }
 inline D3D12_RESOURCE_DESC
 GetDesc(ID3D12Resource *res)
@@ -88,11 +87,6 @@ GetOutputStreamDesc(ID3D12VideoProcessor *proc)
 {
    return proc->GetOutputStreamDesc();
 }
-inline D3D12_RESOURCE_ALLOCATION_INFO
-GetResourceAllocationInfo(ID3D12Device *dev, UINT visibleMask, UINT numResourceDescs, const D3D12_RESOURCE_DESC *pResourceDescs)
-{
-   return dev->GetResourceAllocationInfo(visibleMask, numResourceDescs, pResourceDescs);
-}
 #else
 inline D3D12_CPU_DESCRIPTOR_HANDLE
 GetCPUDescriptorHandleForHeapStart(ID3D12DescriptorHeap *heap)
@@ -106,13 +100,6 @@ GetGPUDescriptorHandleForHeapStart(ID3D12DescriptorHeap *heap)
 {
    D3D12_GPU_DESCRIPTOR_HANDLE ret;
    heap->GetGPUDescriptorHandleForHeapStart(&ret);
-   return ret;
-}
-D3D12_HEAP_DESC
-inline GetDesc(ID3D12Heap* heap)
-{
-   D3D12_HEAP_DESC ret;
-   heap->GetDesc(&ret);
    return ret;
 }
 inline D3D12_RESOURCE_DESC
@@ -141,13 +128,6 @@ GetOutputStreamDesc(ID3D12VideoProcessor *proc)
 {
    D3D12_VIDEO_PROCESS_OUTPUT_STREAM_DESC ret;
    proc->GetOutputStreamDesc(&ret);
-   return ret;
-}
-inline D3D12_RESOURCE_ALLOCATION_INFO
-GetResourceAllocationInfo(ID3D12Device *dev, UINT visibleMask, UINT numResourceDescs, const D3D12_RESOURCE_DESC *pResourceDescs)
-{
-   D3D12_RESOURCE_ALLOCATION_INFO ret;
-   dev->GetResourceAllocationInfo(&ret, visibleMask, numResourceDescs, pResourceDescs);
    return ret;
 }
 #endif

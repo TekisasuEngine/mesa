@@ -72,7 +72,6 @@ struct d3d12_resource_state
 struct d3d12_desired_resource_state
 {
    bool homogenous;
-   bool pending_memory_barrier;
    uint32_t num_subresources;
    D3D12_RESOURCE_STATES* subresource_states;
 };

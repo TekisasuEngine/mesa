@@ -73,6 +73,7 @@ u_pipe_screen_get_param_defaults(struct pipe_screen *pscreen,
       return 0;
 
    case PIPE_CAP_MAX_TEXTURE_2D_SIZE:
+   case PIPE_CAP_MAX_TEXTURE_3D_LEVELS:
    case PIPE_CAP_MAX_TEXTURE_CUBE_LEVELS:
       unreachable("driver must implement these.");
 
@@ -85,7 +86,6 @@ u_pipe_screen_get_param_defaults(struct pipe_screen *pscreen,
    case PIPE_CAP_PRIMITIVE_RESTART_FIXED_INDEX:
    case PIPE_CAP_INDEP_BLEND_ENABLE:
    case PIPE_CAP_INDEP_BLEND_FUNC:
-   case PIPE_CAP_MAX_TEXTURE_3D_LEVELS:
    case PIPE_CAP_MAX_TEXTURE_ARRAY_LAYERS: /* Enables GL_EXT_texture_array */
    case PIPE_CAP_FS_COORD_ORIGIN_UPPER_LEFT:
    case PIPE_CAP_FS_COORD_ORIGIN_LOWER_LEFT:
@@ -100,12 +100,12 @@ u_pipe_screen_get_param_defaults(struct pipe_screen *pscreen,
    case PIPE_CAP_FRAGMENT_COLOR_CLAMPED:
    case PIPE_CAP_SEAMLESS_CUBE_MAP:
    case PIPE_CAP_SEAMLESS_CUBE_MAP_PER_TEXTURE:
-   case PIPE_CAP_MULTIVIEW:
+   case PIPE_CAP_RGB_OVERRIDE_DST_ALPHA_BLEND:
       return 0;
 
    case PIPE_CAP_SUPPORTED_PRIM_MODES_WITH_RESTART:
    case PIPE_CAP_SUPPORTED_PRIM_MODES:
-      return BITFIELD_MASK(MESA_PRIM_COUNT);
+      return BITFIELD_MASK(PIPE_PRIM_MAX);
 
    case PIPE_CAP_MIN_TEXEL_OFFSET:
       /* GL 3.x minimum value. */
@@ -140,11 +140,12 @@ u_pipe_screen_get_param_defaults(struct pipe_screen *pscreen,
 
    case PIPE_CAP_QUADS_FOLLOW_PROVOKING_VERTEX_CONVENTION:
    case PIPE_CAP_USER_VERTEX_BUFFERS:
+   case PIPE_CAP_VERTEX_BUFFER_OFFSET_4BYTE_ALIGNED_ONLY:
+   case PIPE_CAP_VERTEX_BUFFER_STRIDE_4BYTE_ALIGNED_ONLY:
+   case PIPE_CAP_VERTEX_ELEMENT_SRC_OFFSET_4BYTE_ALIGNED_ONLY:
+   case PIPE_CAP_VERTEX_ATTRIB_ELEMENT_ALIGNED_ONLY:
    case PIPE_CAP_COMPUTE:
       return 0;
-
-   case PIPE_CAP_VERTEX_INPUT_ALIGNMENT:
-      return PIPE_VERTEX_INPUT_ALIGNMENT_NONE;
 
    case PIPE_CAP_CONSTANT_BUFFER_OFFSET_ALIGNMENT:
       /* GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT default value. */
@@ -152,7 +153,6 @@ u_pipe_screen_get_param_defaults(struct pipe_screen *pscreen,
 
    case PIPE_CAP_START_INSTANCE:
    case PIPE_CAP_QUERY_TIMESTAMP:
-   case PIPE_CAP_TIMER_RESOLUTION:
    case PIPE_CAP_TEXTURE_MULTISAMPLE:
       return 0;
 
@@ -271,6 +271,7 @@ u_pipe_screen_get_param_defaults(struct pipe_screen *pscreen,
       return 1;
 
    case PIPE_CAP_COPY_BETWEEN_COMPRESSED_AND_PLAIN_FORMATS:
+   case PIPE_CAP_CLEAR_TEXTURE:
    case PIPE_CAP_CLEAR_SCISSORED:
    case PIPE_CAP_DRAW_PARAMETERS:
    case PIPE_CAP_SHADER_PACK_HALF_FLOAT:
@@ -314,6 +315,7 @@ u_pipe_screen_get_param_defaults(struct pipe_screen *pscreen,
    case PIPE_CAP_MIXED_COLOR_DEPTH_BITS:
    case PIPE_CAP_SHADER_ARRAY_COMPONENTS:
    case PIPE_CAP_STREAM_OUTPUT_INTERLEAVE_BUFFERS:
+   case PIPE_CAP_SHADER_CAN_READ_OUTPUTS:
    case PIPE_CAP_NATIVE_FENCE_FD:
       return 0;
 
@@ -331,9 +333,9 @@ u_pipe_screen_get_param_defaults(struct pipe_screen *pscreen,
    case PIPE_CAP_FBFETCH_ZS:
    case PIPE_CAP_BLEND_EQUATION_ADVANCED:
    case PIPE_CAP_LEGACY_MATH_RULES:
-   case PIPE_CAP_FP16:
    case PIPE_CAP_DOUBLES:
    case PIPE_CAP_INT64:
+   case PIPE_CAP_INT64_DIVMOD:
    case PIPE_CAP_TGSI_TEX_TXF_LZ:
    case PIPE_CAP_SHADER_CLOCK:
    case PIPE_CAP_POLYGON_MODE_FILL_RECTANGLE:
@@ -358,6 +360,7 @@ u_pipe_screen_get_param_defaults(struct pipe_screen *pscreen,
    case PIPE_CAP_POST_DEPTH_COVERAGE:
    case PIPE_CAP_BINDLESS_TEXTURE:
    case PIPE_CAP_NIR_SAMPLERS_AS_DEREF:
+   case PIPE_CAP_NIR_COMPACT_ARRAYS:
    case PIPE_CAP_QUERY_SO_OVERFLOW:
    case PIPE_CAP_MEMOBJ:
    case PIPE_CAP_LOAD_CONSTBUF:
@@ -439,7 +442,7 @@ u_pipe_screen_get_param_defaults(struct pipe_screen *pscreen,
       return 0;
 
    case PIPE_CAP_DMABUF:
-#if defined(HAVE_LIBDRM) && (DETECT_OS_LINUX || DETECT_OS_BSD || DETECT_OS_MANAGARM)
+#if defined(HAVE_LIBDRM) && (DETECT_OS_LINUX || DETECT_OS_BSD)
       fd = pscreen->get_screen_fd(pscreen);
       if (fd != -1 && (drmGetCap(fd, DRM_CAP_PRIME, &cap) == 0))
          return cap;
@@ -448,9 +451,6 @@ u_pipe_screen_get_param_defaults(struct pipe_screen *pscreen,
 #else
       return 0;
 #endif
-
-   case PIPE_CAP_CL_GL_SHARING:
-      return 0;
 
    case PIPE_CAP_TEXTURE_SHADOW_MAP: /* Enables ARB_shadow */
       return 1;
@@ -549,22 +549,6 @@ u_pipe_screen_get_param_defaults(struct pipe_screen *pscreen,
    case PIPE_CAP_VALIDATE_ALL_DIRTY_STATES:
    case PIPE_CAP_NULL_TEXTURES:
    case PIPE_CAP_ASTC_VOID_EXTENTS_NEED_DENORM_FLUSH:
-   case PIPE_CAP_ASTC_DECODE_MODE:
-   case PIPE_CAP_HAS_CONST_BW:
-      return 0;
-
-   case PIPE_CAP_TEXTURE_SAMPLER_INDEPENDENT:
-      /* this is expected of gallium drivers, but some just don't support it */
-      return 1;
-
-   case PIPE_CAP_PERFORMANCE_MONITOR:
-      return pscreen->get_driver_query_info && pscreen->get_driver_query_group_info &&
-             pscreen->get_driver_query_group_info(pscreen, 0, NULL) != 0;
-
-   case PIPE_CAP_SHADER_SUBGROUP_SIZE:
-   case PIPE_CAP_SHADER_SUBGROUP_SUPPORTED_STAGES:
-   case PIPE_CAP_SHADER_SUBGROUP_SUPPORTED_FEATURES:
-   case PIPE_CAP_SHADER_SUBGROUP_QUAD_ALL_STAGES:
       return 0;
 
    default:
@@ -644,7 +628,7 @@ static simple_mtx_t screen_mutex = SIMPLE_MTX_INITIALIZER;
 static void
 drm_screen_destroy(struct pipe_screen *pscreen)
 {
-   bool destroy;
+   boolean destroy;
 
    simple_mtx_lock(&screen_mutex);
    destroy = --pscreen->refcnt == 0;

@@ -118,8 +118,7 @@ struct decode_scope {
  */
 struct decode_state {
 	const struct isa_decode_options *options;
-
-	struct isa_print_state print;
+	FILE *out;
 
 	/**
 	 * Current instruction being decoded:
@@ -132,20 +131,15 @@ struct decode_state {
 	unsigned num_instr;
 
 	/**
+	 * Column number of current line
+	 */
+	unsigned line_column;
+
+	/**
 	 * Bitset of instructions that are branch targets (if options->branch_labels
 	 * is enabled)
 	 */
 	BITSET_WORD *branch_targets;
-
-	/**
-	 * Bitset of instructions that are call targets.
-	 */
-	BITSET_WORD *call_targets;
-
-	/**
-	 * Bitset of instructions that are entrypoints.
-	 */
-	BITSET_WORD *entrypoints;
 
 	/**
 	 * We allow a limited amount of expression evaluation recursion, but
@@ -162,12 +156,6 @@ struct decode_state {
 	 */
 	struct decode_scope *scope;
 
-	/* Next entrypoint to be decoded. */
-	struct isa_entrypoint *next_entrypoint;
-
-	/* Sentinel value after the last entrypoint in the array. */
-	struct isa_entrypoint *end_entrypoint;
-
 	/**
 	 * A small fixed upper limit on # of decode errors to capture per-
 	 * instruction seems reasonable.
@@ -175,6 +163,37 @@ struct decode_state {
 	unsigned num_errors;
 	char *errors[4];
 };
+
+static void
+print(struct decode_state *state, const char *fmt, ...)
+{
+	char *buffer;
+	va_list args;
+	int ret;
+
+	va_start(args, fmt);
+	ret = vasprintf(&buffer, fmt, args);
+	va_end(args);
+
+	if (ret != -1) {
+		const size_t len = strlen(buffer);
+
+		for (size_t i = 0; i < len; i++) {
+			const char c = buffer[i];
+
+			fputc(c, state->out);
+			state->line_column++;
+
+			if (c == '\n') {
+				state->line_column = 0;
+			}
+      }
+
+		free(buffer);
+
+		return;
+	}
+}
 
 static void display(struct decode_scope *scope);
 static void decode_error(struct decode_state *state, const char *fmt, ...) _util_printf_format(2,3);
@@ -202,9 +221,9 @@ flush_errors(struct decode_state *state)
 {
 	unsigned num_errors = state->num_errors;
 	if (num_errors > 0)
-		isa_print(&state->print, "\t; ");
+		print(state, "\t; ");
 	for (unsigned i = 0; i < num_errors; i++) {
-		isa_print(&state->print, "%s%s", (i > 0) ? ", " : "", state->errors[i]);
+		print(state, "%s%s", (i > 0) ? ", " : "", state->errors[i]);
 		free(state->errors[i]);
 	}
 	state->num_errors = 0;
@@ -467,12 +486,12 @@ display_enum_field(struct decode_scope *scope, const struct isa_field *field, bi
 
 	for (unsigned i = 0; i < e->num_values; i++) {
 		if (e->values[i].val == ui) {
-			isa_print(&scope->state->print, "%s", e->values[i].display);
+			print(scope->state, "%s", e->values[i].display);
 			return;
 		}
 	}
 
-	isa_print(&scope->state->print, "%u", (unsigned)ui);
+	print(scope->state, "%u", (unsigned)ui);
 }
 
 static const struct isa_field *
@@ -513,7 +532,7 @@ resolve_field(struct decode_scope *scope, const char *field_name, size_t field_n
 }
 
 /* This is also used from generated expr functions */
-static uint64_t
+uint64_t
 isa_decode_field(struct decode_scope *scope, const char *field_name)
 {
 	bitmask_t val;
@@ -526,18 +545,11 @@ isa_decode_field(struct decode_scope *scope, const char *field_name)
 	return bitmask_to_uint64_t(val);
 }
 
-static uint32_t
-isa_get_gpu_id(struct decode_scope *scope)
-{
-	return scope->state->options->gpu_id;
-}
-
 static void
 display_field(struct decode_scope *scope, const char *field_name)
 {
 	const struct isa_decode_options *options = scope->state->options;
 	struct decode_state *state = scope->state;
-	struct isa_print_state *print = &state->print;
 	size_t field_name_len = strlen(field_name);
 	int num_align = 0;
 
@@ -553,8 +565,8 @@ display_field(struct decode_scope *scope, const char *field_name)
 
 	/* Special case ':algin=' should only do alignment */
 	if (field_name == align) {
-		while (scope->state->print.line_column < num_align)
-			isa_print(print, " ");
+		while (scope->state->line_column < num_align)
+			print(state, " ");
 
 		return;
 	}
@@ -567,10 +579,10 @@ display_field(struct decode_scope *scope, const char *field_name)
 			});
 		}
 
-		while (scope->state->print.line_column < num_align)
-			isa_print(print, " ");
+		while (scope->state->line_column < num_align)
+			print(state, " ");
 
-		isa_print(print, "%s", scope->bitset->name);
+		print(scope->state, "%s", scope->bitset->name);
 
 		return;
 	}
@@ -592,89 +604,60 @@ display_field(struct decode_scope *scope, const char *field_name)
 
 	unsigned width = 1 + field->high - field->low;
 
-	while (scope->state->print.line_column < num_align)
-		isa_print(print, " ");
+	while (scope->state->line_column < num_align)
+		print(state, " ");
 
 	switch (field->type) {
 	/* Basic types: */
 	case TYPE_BRANCH:
-        case TYPE_ABSBRANCH:
 		if (scope->state->options->branch_labels) {
-			int offset;
-			if (field->type == TYPE_BRANCH) {
-				offset = util_sign_extend(val, width) + scope->state->n;
-			} else {
-				offset = val;
-			}
+			int offset = util_sign_extend(val, width) + scope->state->n;
 			if (offset < scope->state->num_instr) {
-				if (field->call) {
-					isa_print(print, "fxn%d", offset);
-					BITSET_SET(scope->state->call_targets, offset);
-				} else {
-					isa_print(print, "l%d", offset);
-					BITSET_SET(scope->state->branch_targets, offset);
-				}
+				print(scope->state, "l%d", offset);
+				BITSET_SET(scope->state->branch_targets, offset);
 				break;
 			}
 		}
 		FALLTHROUGH;
 	case TYPE_INT:
-		isa_print(print, "%"PRId64, util_sign_extend(val, width));
+		print(scope->state, "%"PRId64, util_sign_extend(val, width));
 		break;
 	case TYPE_UINT:
-		isa_print(print, "%"PRIu64, val);
+		print(scope->state, "%"PRIu64, val);
 		break;
 	case TYPE_HEX:
 		// TODO format # of digits based on field width?
-		isa_print(print, "%"PRIx64, val);
+		print(scope->state, "%"PRIx64, val);
 		break;
 	case TYPE_OFFSET:
 		if (val != 0) {
-			isa_print(print, "%+"PRId64, util_sign_extend(val, width));
+			print(scope->state, "%+"PRId64, util_sign_extend(val, width));
 		}
 		break;
 	case TYPE_UOFFSET:
 		if (val != 0) {
-			isa_print(print, "+%"PRIu64, val);
+			print(scope->state, "+%"PRIu64, val);
 		}
 		break;
 	case TYPE_FLOAT:
 		if (width == 16) {
-			isa_print(print, "%f", _mesa_half_to_float(val));
+			print(scope->state, "%f", _mesa_half_to_float(val));
 		} else {
 			assert(width == 32);
-			isa_print(print, "%f", uif(val));
+			print(scope->state, "%f", uif(val));
 		}
 		break;
 	case TYPE_BOOL:
 		if (field->display) {
 			if (val) {
-				isa_print(print, "%s", field->display);
+				print(scope->state, "%s", field->display);
 			}
 		} else {
-			isa_print(print, "%u", (unsigned)val);
+			print(scope->state, "%u", (unsigned)val);
 		}
 		break;
-	case TYPE_BOOL_INV: {
-		if (field->display) {
-			if (!val) {
-				isa_print(print, "%s", field->display);
-			}
-		} else {
-			isa_print(print, "%u", (unsigned)!val);
-		}
-		break;
-	}
 	case TYPE_ENUM:
 		display_enum_field(scope, field, v);
-		break;
-	case TYPE_CUSTOM:
-		/* The user has to provide a field_print_cb, but this can
-		 * still be NULL during the branch offset pre-pass.
-		 */
-		if (state->options->field_print_cb) {
-			state->options->field_print_cb(print, field_name, val);
-		}
 		break;
 
 	case TYPE_ASSERT:
@@ -718,15 +701,15 @@ display(struct decode_scope *scope)
 
 			p = e;
 		} else {
-			fputc(*p, scope->state->print.out);
-			scope->state->print.line_column++;
+			fputc(*p, scope->state->out);
+			scope->state->line_column++;
 		}
 		p++;
 	}
 }
 
 static void
-disasm(struct decode_state *state, void *bin, int sz)
+decode(struct decode_state *state, void *bin, int sz)
 {
 	BITSET_WORD *instrs = bin;
 	unsigned errors = 0;   /* number of consecutive unmatched instructions */
@@ -737,66 +720,31 @@ disasm(struct decode_state *state, void *bin, int sz)
 		bitmask_t instr = { 0 };
 
 		next_instruction(&instr, &instrs[state->n * BITMASK_WORDS]);
-		state->print.line_column = 0;
+      state->line_column = 0;
 
 		if (state->options->max_errors && (errors > state->options->max_errors)) {
 			break;
 		}
 
-		if (state->options->branch_labels) {
-			bool entrypoint = state->next_entrypoint !=
-				state->end_entrypoint &&
-				state->next_entrypoint->offset == state->n;
-
-			/* Print an extra empty line before functions and
-			 * entrypoints to more clearly separate them.
-			 */
-			if ((BITSET_TEST(state->call_targets, state->n) || entrypoint) &&
-			    state->n != 0) {
-				if (state->options->pre_instr_cb) {
-					state->options->pre_instr_cb(state->options->cbdata,
-							state->n, instr.bitset);
-				}
-				isa_print(&state->print, "\n");
+		if (state->options->branch_labels &&
+				BITSET_TEST(state->branch_targets, state->n)) {
+			if (state->options->instr_cb) {
+				state->options->instr_cb(state->options->cbdata,
+						state->n, instr.bitset);
 			}
-
-			while (state->next_entrypoint != state->end_entrypoint &&
-			       state->next_entrypoint->offset == state->n) {
-				if (state->options->pre_instr_cb) {
-					state->options->pre_instr_cb(state->options->cbdata,
-							state->n, instr.bitset);
-				}
-				isa_print(&state->print, "%s:\n", state->next_entrypoint->name);
-				state->next_entrypoint++;
-			}
-
-			if (BITSET_TEST(state->call_targets, state->n)) {
-				if (state->options->pre_instr_cb) {
-					state->options->pre_instr_cb(state->options->cbdata,
-							state->n, instr.bitset);
-				}
-				isa_print(&state->print, "fxn%d:\n", state->n);
-			}
-
-			if (BITSET_TEST(state->branch_targets, state->n)) {
-				if (state->options->pre_instr_cb) {
-					state->options->pre_instr_cb(state->options->cbdata,
-							state->n, instr.bitset);
-				}
-				isa_print(&state->print, "l%d:\n", state->n);
-			}
+			print(state, "l%d:\n", state->n);
 		}
 
-		if (state->options->pre_instr_cb) {
-			state->options->pre_instr_cb(state->options->cbdata, state->n, instr.bitset);
+		if (state->options->instr_cb) {
+			state->options->instr_cb(state->options->cbdata, state->n, instr.bitset);
 		}
 
 		const struct isa_bitset *b = find_bitset(state, __instruction, instr);
 		if (!b) {
 			if (state->options->no_match_cb) {
-				state->options->no_match_cb(state->print.out, instr.bitset, BITMASK_WORDS);
+				state->options->no_match_cb(state->out, instr.bitset, BITMASK_WORDS);
 			} else {
-				isa_print(&state->print, "no match: %"BITSET_FORMAT"\n", BITSET_VALUE(instr.bitset));
+				print(state, "no match: %"BITSET_FORMAT"\n", BITSET_VALUE(instr.bitset));
 			}
 			errors++;
 			continue;
@@ -810,12 +758,7 @@ disasm(struct decode_state *state, void *bin, int sz)
 		} else {
 			errors = 0;
 		}
-
-		if (state->options->post_instr_cb) {
-			state->options->post_instr_cb(state->options->cbdata, state->n, instr.bitset);
-		}
-
-		isa_print(&state->print, "\n");
+		print(state, "\n");
 
 		pop_scope(scope);
 
@@ -825,133 +768,8 @@ disasm(struct decode_state *state, void *bin, int sz)
 	}
 }
 
-static void
-decode_bitset_cb(void *out, struct decode_scope *scope, const struct isa_bitset *b)
-{
-	while (b) {
-		b->decode(out, scope);
-		b = b->parent;
-	}
-}
-
-static void
-decode_field(void *out, struct decode_scope *scope, const char *field_name)
-{
-	const struct isa_bitset *bitset = scope->bitset;
-	size_t field_name_len = strlen(field_name);
-
-	/* alignment handling */
-	const char *align = strstr(field_name, ":align=");
-
-	if (align) {
-		field_name_len = align - field_name;
-	}
-
-	if (field_name == align)
-		return;
-
-	if (!strncmp("NAME", field_name, field_name_len))
-		return;
-
-	bitmask_t v;
-	const struct isa_field *field = resolve_field(scope, field_name, field_name_len, &v);
-	if (!field) {
-		decode_error(scope->state, "no field '%.*s'", (int)field_name_len, field_name);
-		return;
-	}
-
-	uint64_t val = bitmask_to_uint64_t(v);
-
-	for (unsigned i = 0; i < bitset->num_decode_fields; i++) {
-		if (!strncmp(bitset->decode_fields[i].name, field_name, field_name_len)) {
-			bitset->decode_fields[i].decode(out, scope, val);
-			return;
-		}
-	}
-}
-
-static void
-decode_bitset(void *out, struct decode_scope *scope)
-{
-	const struct isa_bitset *bitset = scope->bitset;
-	decode_bitset_cb(out, scope, bitset);
-
-	const char *display = find_display(scope, bitset);
-
-	if (!display) {
-		decode_error(scope->state, "%s: no display template", bitset->name);
-		return;
-	}
-
-	const char *p = display;
-
-	while (*p != '\0') {
-		if (*p == '{') {
-			const char *e = ++p;
-			while (*e != '}') {
-				e++;
-			}
-
-			char *field_name = strndup(p, e-p);
-			decode_field(out, scope, field_name);
-			free(field_name);
-
-			p = e;
-		}
-		p++;
-	}
-}
-
-static void
-isa_decode_bitset(void *out, const struct isa_bitset **bitsets, struct decode_scope *scope, bitmask_t val)
-{
-	struct decode_state *state = scope->state;
-
-	const struct isa_bitset *b = find_bitset(state, bitsets, val);
-	if (!b)
-		return;
-
-	struct decode_scope *new_scope = push_scope(state, b, val);
-
-	decode_bitset(out, new_scope);
-
-	pop_scope(new_scope);
-}
-
-static bool
-decode(void *out, struct decode_state *state, void *bin)
-{
-	bitmask_t instr = { 0 };
-	next_instruction(&instr, bin);
-
-	const struct isa_bitset *b = find_bitset(state, __instruction, instr);
-	if (!b)
-		return false;
-
-	struct decode_scope *scope = push_scope(state, b, instr);
-
-	decode_bitset(out, scope);
-
-	pop_scope(scope);
-	return true;
-}
-
-static int
-cmp_entrypoints(const void *_a, const void *_b)
-{
-	const struct isa_entrypoint *a = _a, *b = _b;
-
-	/* For stable output, if we have multiple entrypoints with the same
-	 * offset, sort them by string name:
-	 */
-	if (a->offset == b->offset)
-		return strcmp(a->name, b->name);
-
-	return (int)a->offset - (int)b->offset;
-}
-
-static void
-isa_disasm(void *bin, int sz, FILE *out, const struct isa_decode_options *options)
+void
+isa_decode(void *bin, int sz, FILE *out, const struct isa_decode_options *options)
 {
 	const struct isa_decode_options default_options = {
 		.gpu_id = options ? options->gpu_id : 0,
@@ -969,53 +787,20 @@ isa_disasm(void *bin, int sz, FILE *out, const struct isa_decode_options *option
 	if (state->options->branch_labels) {
 		state->branch_targets = rzalloc_size(state,
 				sizeof(BITSET_WORD) * BITSET_WORDS(state->num_instr));
-		state->call_targets = rzalloc_size(state,
-				sizeof(BITSET_WORD) * BITSET_WORDS(state->num_instr));
 
 		/* Do a pre-pass to find all the branch targets: */
-		state->print.out = fopen("/dev/null", "w");
+		state->out = fopen("/dev/null", "w");
 		state->options = &default_options;   /* skip hooks for prepass */
-		disasm(state, bin, sz);
-		fclose(state->print.out);
+		decode(state, bin, sz);
+		fclose(state->out);
 		if (options) {
 			state->options = options;
 		}
-
-		/* Sort the entrypoints by offset and initialize entrypoint
-		 * state.
-		 */
-		if (options->entrypoint_count) {
-			struct isa_entrypoint *entrypoints =
-				ralloc_array(state, struct isa_entrypoint,
-					     options->entrypoint_count);
-			memcpy(entrypoints, options->entrypoints,
-			       options->entrypoint_count * sizeof(*entrypoints));
-			qsort(entrypoints, options->entrypoint_count,
-			      sizeof(*entrypoints), cmp_entrypoints);
-			state->next_entrypoint = entrypoints;
-			state->end_entrypoint = entrypoints + options->entrypoint_count;
-		}
 	}
 
-	state->print.out = out;
+	state->out = out;
 
-	disasm(state, bin, sz);
-
-	ralloc_free(state);
-}
-
-static bool
-isa_decode(void *out, void *bin, const struct isa_decode_options *options)
-{
-	struct decode_state *state = rzalloc_size(NULL, sizeof(*state));
-	state->options = options;
-
-	bool result = decode(out, state, bin);
-
-	if (flush_errors(state)) {
-		return false;
-	}
+	decode(state, bin, sz);
 
 	ralloc_free(state);
-	return result;
 }

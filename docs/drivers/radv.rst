@@ -9,21 +9,12 @@ Debugging
 For a list of environment variables to debug RADV, please see
 :ref:`radv env-vars` for a list.
 
-Instructions for debugging GPU hangs can be found :ref:`here <radv-debug-hang>`.
-
 Hardware Documentation
 ----------------------
 
 You can find a list of documentation for the various generations of
 AMD hardware on the `X.Org wiki
 <https://www.x.org/wiki/RadeonFeature/#documentation>`__.
-
-Additional community-written documentation is also available in Mesa:
-
-.. toctree::
-   :glob:
-
-   amd/hw/*
 
 ACO
 ---

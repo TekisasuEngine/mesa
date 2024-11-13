@@ -36,8 +36,20 @@ is_ssbo_intrinsic(nir_intrinsic_instr *intrin)
    switch (intrin->intrinsic) {
    case nir_intrinsic_load_ssbo:
    case nir_intrinsic_store_ssbo:
-   case nir_intrinsic_ssbo_atomic:
-   case nir_intrinsic_ssbo_atomic_swap:
+   case nir_intrinsic_ssbo_atomic_add:
+   case nir_intrinsic_ssbo_atomic_imin:
+   case nir_intrinsic_ssbo_atomic_umin:
+   case nir_intrinsic_ssbo_atomic_imax:
+   case nir_intrinsic_ssbo_atomic_umax:
+   case nir_intrinsic_ssbo_atomic_and:
+   case nir_intrinsic_ssbo_atomic_or:
+   case nir_intrinsic_ssbo_atomic_xor:
+   case nir_intrinsic_ssbo_atomic_exchange:
+   case nir_intrinsic_ssbo_atomic_comp_swap:
+   case nir_intrinsic_ssbo_atomic_fadd:
+   case nir_intrinsic_ssbo_atomic_fmin:
+   case nir_intrinsic_ssbo_atomic_fmax:
+   case nir_intrinsic_ssbo_atomic_fcomp_swap:
       return true;
 
    default:
@@ -52,24 +64,57 @@ is_image_intrinsic(nir_intrinsic_instr *intrin)
    case nir_intrinsic_image_load:
    case nir_intrinsic_image_sparse_load:
    case nir_intrinsic_image_store:
-   case nir_intrinsic_image_atomic:
-   case nir_intrinsic_image_atomic_swap:
+   case nir_intrinsic_image_atomic_add:
+   case nir_intrinsic_image_atomic_imin:
+   case nir_intrinsic_image_atomic_umin:
+   case nir_intrinsic_image_atomic_imax:
+   case nir_intrinsic_image_atomic_umax:
+   case nir_intrinsic_image_atomic_and:
+   case nir_intrinsic_image_atomic_or:
+   case nir_intrinsic_image_atomic_xor:
+   case nir_intrinsic_image_atomic_exchange:
+   case nir_intrinsic_image_atomic_comp_swap:
+   case nir_intrinsic_image_atomic_fadd:
+   case nir_intrinsic_image_atomic_fmin:
+   case nir_intrinsic_image_atomic_fmax:
    case nir_intrinsic_image_size:
    case nir_intrinsic_image_samples:
    case nir_intrinsic_image_fragment_mask_load_amd:
    case nir_intrinsic_bindless_image_load:
    case nir_intrinsic_bindless_image_sparse_load:
    case nir_intrinsic_bindless_image_store:
-   case nir_intrinsic_bindless_image_atomic:
-   case nir_intrinsic_bindless_image_atomic_swap:
+   case nir_intrinsic_bindless_image_atomic_add:
+   case nir_intrinsic_bindless_image_atomic_imin:
+   case nir_intrinsic_bindless_image_atomic_umin:
+   case nir_intrinsic_bindless_image_atomic_imax:
+   case nir_intrinsic_bindless_image_atomic_umax:
+   case nir_intrinsic_bindless_image_atomic_and:
+   case nir_intrinsic_bindless_image_atomic_or:
+   case nir_intrinsic_bindless_image_atomic_xor:
+   case nir_intrinsic_bindless_image_atomic_exchange:
+   case nir_intrinsic_bindless_image_atomic_comp_swap:
+   case nir_intrinsic_bindless_image_atomic_fadd:
+   case nir_intrinsic_bindless_image_atomic_fmin:
+   case nir_intrinsic_bindless_image_atomic_fmax:
    case nir_intrinsic_bindless_image_size:
    case nir_intrinsic_bindless_image_samples:
    case nir_intrinsic_bindless_image_fragment_mask_load_amd:
    case nir_intrinsic_image_deref_load:
    case nir_intrinsic_image_deref_sparse_load:
    case nir_intrinsic_image_deref_store:
-   case nir_intrinsic_image_deref_atomic:
-   case nir_intrinsic_image_deref_atomic_swap:
+   case nir_intrinsic_image_deref_atomic_add:
+   case nir_intrinsic_image_deref_atomic_umin:
+   case nir_intrinsic_image_deref_atomic_imin:
+   case nir_intrinsic_image_deref_atomic_umax:
+   case nir_intrinsic_image_deref_atomic_imax:
+   case nir_intrinsic_image_deref_atomic_and:
+   case nir_intrinsic_image_deref_atomic_or:
+   case nir_intrinsic_image_deref_atomic_xor:
+   case nir_intrinsic_image_deref_atomic_exchange:
+   case nir_intrinsic_image_deref_atomic_comp_swap:
+   case nir_intrinsic_image_deref_atomic_fadd:
+   case nir_intrinsic_image_deref_atomic_fmin:
+   case nir_intrinsic_image_deref_atomic_fmax:
    case nir_intrinsic_image_deref_size:
    case nir_intrinsic_image_deref_samples:
    case nir_intrinsic_image_deref_fragment_mask_load_amd:
@@ -101,7 +146,7 @@ nir_has_non_uniform_access_impl(nir_function_impl *impl, enum nir_lower_non_unif
          case nir_instr_type_tex: {
             nir_tex_instr *tex = nir_instr_as_tex(instr);
             if ((types & nir_lower_non_uniform_texture_access) &&
-                has_non_uniform_tex_access(tex))
+                 has_non_uniform_tex_access(tex))
                return true;
             break;
          }
@@ -110,19 +155,15 @@ nir_has_non_uniform_access_impl(nir_function_impl *impl, enum nir_lower_non_unif
             nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
             if (is_ubo_intrinsic(intrin)) {
                if ((types & nir_lower_non_uniform_ubo_access) &&
-                   has_non_uniform_access_intrin(intrin))
+                    has_non_uniform_access_intrin(intrin))
                   return true;
             } else if (is_ssbo_intrinsic(intrin)) {
                if ((types & nir_lower_non_uniform_ssbo_access) &&
-                   has_non_uniform_access_intrin(intrin))
+                    has_non_uniform_access_intrin(intrin))
                   return true;
             } else if (is_image_intrinsic(intrin)) {
                if ((types & nir_lower_non_uniform_image_access) &&
-                   has_non_uniform_access_intrin(intrin))
-                  return true;
-            } else if (intrin->intrinsic == nir_intrinsic_get_ssbo_size) {
-               if ((types & nir_lower_non_uniform_get_ssbo_size) &&
-                   has_non_uniform_access_intrin(intrin))
+                    has_non_uniform_access_intrin(intrin))
                   return true;
             } else {
                /* Nothing to do */
@@ -143,8 +184,8 @@ nir_has_non_uniform_access_impl(nir_function_impl *impl, enum nir_lower_non_unif
 bool
 nir_has_non_uniform_access(nir_shader *shader, enum nir_lower_non_uniform_access_type types)
 {
-   nir_foreach_function_impl(impl, shader) {
-      if (nir_has_non_uniform_access_impl(impl, types))
+   nir_foreach_function(function, shader) {
+      if (function->impl && nir_has_non_uniform_access_impl(function->impl, types))
          return true;
    }
 
@@ -164,7 +205,7 @@ opt_non_uniform_tex_access(nir_tex_instr *tex)
       case nir_tex_src_texture_offset:
       case nir_tex_src_texture_handle:
       case nir_tex_src_texture_deref:
-         if (tex->texture_non_uniform && !nir_src_is_divergent(&tex->src[i].src)) {
+         if (tex->texture_non_uniform && !tex->src[i].src.ssa->divergent) {
             tex->texture_non_uniform = false;
             progress = true;
          }
@@ -173,7 +214,7 @@ opt_non_uniform_tex_access(nir_tex_instr *tex)
       case nir_tex_src_sampler_offset:
       case nir_tex_src_sampler_handle:
       case nir_tex_src_sampler_deref:
-         if (tex->sampler_non_uniform && !nir_src_is_divergent(&tex->src[i].src)) {
+         if (tex->sampler_non_uniform && !tex->src[i].src.ssa->divergent) {
             tex->sampler_non_uniform = false;
             progress = true;
          }
@@ -193,7 +234,7 @@ opt_non_uniform_access_intrin(nir_intrinsic_instr *intrin, unsigned handle_src)
    if (!has_non_uniform_access_intrin(intrin))
       return false;
 
-   if (nir_src_is_divergent(&intrin->src[handle_src]))
+   if (intrin->src[handle_src].ssa->divergent)
       return false;
 
    nir_intrinsic_set_access(intrin, nir_intrinsic_access(intrin) & ~ACCESS_NON_UNIFORM);
@@ -231,11 +272,14 @@ nir_opt_non_uniform_access_instr(nir_builder *b, nir_instr *instr, UNUSED void *
 bool
 nir_opt_non_uniform_access(nir_shader *shader)
 {
+   NIR_PASS(_, shader, nir_convert_to_lcssa, true, true);
    nir_divergence_analysis(shader);
 
    bool progress = nir_shader_instructions_pass(shader,
                                                 nir_opt_non_uniform_access_instr,
                                                 nir_metadata_all, NULL);
+
+   NIR_PASS(_, shader, nir_opt_remove_phis); /* cleanup LCSSA phis */
 
    return progress;
 }

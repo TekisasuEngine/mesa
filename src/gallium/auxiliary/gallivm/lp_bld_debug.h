@@ -32,7 +32,7 @@
 
 #include "gallivm/lp_bld.h"
 
-#include "util/compiler.h"
+#include "pipe/p_compiler.h"
 #include "util/u_string.h"
 
 
@@ -62,7 +62,7 @@ extern unsigned gallivm_debug;
 static inline void
 lp_build_name(LLVMValueRef val, const char *format, ...)
 {
-#if MESA_DEBUG
+#ifdef DEBUG
    char name[32];
    va_list ap;
    va_start(ap, format);
@@ -80,7 +80,7 @@ void
 lp_debug_dump_value(LLVMValueRef value);
 
 
-bool
+boolean
 lp_check_alignment(const void *ptr, unsigned alignment);
 
 

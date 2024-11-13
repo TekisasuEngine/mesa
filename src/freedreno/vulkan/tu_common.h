@@ -17,7 +17,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <tuple>
 #ifdef HAVE_VALGRIND
 #include <memcheck.h>
 #include <valgrind.h>
@@ -31,7 +30,6 @@
 #include "c11/threads.h"
 #include "util/rounding.h"
 #include "util/bitscan.h"
-#include "util/detect_os.h"
 #include "util/list.h"
 #include "util/log.h"
 #include "util/macros.h"
@@ -68,12 +66,12 @@
 #include <vulkan/vulkan.h>
 
 #include "tu_entrypoints.h"
+#include "vulkan/runtime/vk_common_entrypoints.h"
 
 #include "vk_format.h"
 #include "vk_image.h"
 #include "vk_command_buffer.h"
 #include "vk_command_pool.h"
-#include "vk_common_entrypoints.h"
 #include "vk_queue.h"
 #include "vk_object.h"
 #include "vk_sync.h"
@@ -95,12 +93,6 @@
 #define MAX_DYNAMIC_BUFFERS_SIZE                                             \
    (MAX_DYNAMIC_UNIFORM_BUFFERS + 2 * MAX_DYNAMIC_STORAGE_BUFFERS) *         \
    A6XX_TEX_CONST_DWORDS
-
-/* With dynamic rendering, input attachment indices are shifted by 1 and
- * attachment 0 is used for input attachments without an InputAttachmentIndex
- * (which can only be depth/stencil).
- */
-#define TU_DYN_INPUT_ATT_OFFSET 1
 
 #define SAMPLE_LOCATION_MIN 0.f
 #define SAMPLE_LOCATION_MAX 0.9375f
@@ -126,20 +118,27 @@
 #define A6XX_TEX_CONST_DWORDS 16
 #define A6XX_TEX_SAMP_DWORDS 4
 
-/* We sample the fragment density map on the CPU, so technically the
- * minimum/maximum texel size is arbitrary. However sizes smaller than the
- * minimum tile width alignment of 32 are likely pointless, so we use that as
- * the minimum value. For the maximum just pick a value larger than anyone
- * would reasonably need.
- */
-#define MIN_FDM_TEXEL_SIZE_LOG2 5
-#define MIN_FDM_TEXEL_SIZE (1u << MIN_FDM_TEXEL_SIZE_LOG2)
-#define MAX_FDM_TEXEL_SIZE_LOG2 10
-#define MAX_FDM_TEXEL_SIZE (1u << MAX_FDM_TEXEL_SIZE_LOG2)
+#define TU_FROM_HANDLE(__tu_type, __name, __handle)                          \
+   VK_FROM_HANDLE(__tu_type, __name, __handle)
 
-#define TU_GENX(FUNC_NAME) FD_GENX(FUNC_NAME)
+#define ACT_0(ACTION)
+#define ACT_1(ACTION, X) ACTION(X)
+#define ACT_2(ACTION, X, ...) ACTION(X) ACT_1(ACTION, __VA_ARGS__)
+#define ACT_3(ACTION, X, ...) ACTION(X) ACT_2(ACTION, __VA_ARGS__)
+#define ACT_4(ACTION, X, ...) ACTION(X) ACT_3(ACTION, __VA_ARGS__)
+#define ACT_5(ACTION, X, ...) ACTION(X) ACT_4(ACTION, __VA_ARGS__)
+#define ACT_6(ACTION, X, ...) ACTION(X) ACT_5(ACTION, __VA_ARGS__)
 
-#define TU_CALLX(device, thing) FD_CALLX((device)->physical_device->info, thing)
+#define GET_ACT_MACRO(_0, _1, _2, _3, _4, _5, _6, NAME, ...) NAME
+
+/* Do the action for the each vararg. It could be macro, function call, etc. */
+#define ACTION_FOR_EACH(action, ...)                                               \
+   GET_ACT_MACRO(_0, __VA_ARGS__, ACT_6, ACT_5, ACT_4, ACT_3, ACT_2, ACT_1, ACT_0) \
+   (action, __VA_ARGS__)
+
+#define TU_GPU_GENS A6XX, A7XX
+#define TU_GENX(entrypoint) \
+  ACTION_FOR_EACH(entrypoint ## _GENS, TU_GPU_GENS)
 
 /* vk object types */
 struct tu_buffer;
@@ -163,6 +162,7 @@ struct tu_query_pool;
 struct tu_queue;
 struct tu_render_pass;
 struct tu_sampler;
+struct tu_sampler_ycbcr_conversion;
 
 struct breadcrumbs_context;
 struct tu_bo;

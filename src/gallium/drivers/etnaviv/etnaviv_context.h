@@ -96,10 +96,8 @@ enum etna_uniform_contents {
    ETNA_UNIFORM_UNIFORM,
    ETNA_UNIFORM_TEXRECT_SCALE_X,
    ETNA_UNIFORM_TEXRECT_SCALE_Y,
-   ETNA_UNIFORM_TEXTURE_WIDTH,
-   ETNA_UNIFORM_TEXTURE_HEIGHT,
-   ETNA_UNIFORM_TEXTURE_DEPTH,
-   ETNA_UNIFORM_UBO_ADDR,
+   ETNA_UNIFORM_UBO0_ADDR,
+   ETNA_UNIFORM_UBOMAX_ADDR = ETNA_UNIFORM_UBO0_ADDR + ETNA_MAX_CONST_BUF - 1,
 };
 
 struct etna_shader_uniform_info {
@@ -143,7 +141,6 @@ struct etna_context {
       ETNA_DIRTY_TEXTURE_CACHES  = (1 << 18),
       ETNA_DIRTY_DERIVE_TS       = (1 << 19),
       ETNA_DIRTY_SCISSOR_CLIP    = (1 << 20),
-      ETNA_DIRTY_SHADER_CACHES   = (1 << 21),
    } dirty;
 
    struct slab_child_pool transfer_pool;
@@ -155,7 +152,6 @@ struct etna_context {
    struct pipe_blend_state *blend;
    unsigned num_fragment_samplers;
    uint32_t active_samplers;
-   uint32_t prev_active_samplers;
    struct pipe_sampler_state *sampler[PIPE_MAX_SAMPLERS];
    struct pipe_rasterizer_state *rasterizer;
    struct pipe_depth_stencil_alpha_state *zsa;
@@ -201,17 +197,8 @@ struct etna_context {
 
    /* resources that must be flushed implicitly at the context flush time */
    struct set *flush_resources;
-   /* resources that need to be updated after a context flush */
-   struct set *updated_resources;
 
    bool is_noop;
-
-   bool compute_only;
-
-   /* conditional rendering */
-   struct pipe_query *cond_query;
-   bool cond_cond; /* inverted rendering condition */
-   uint cond_mode;
 };
 
 static inline struct etna_context *
@@ -232,12 +219,5 @@ etna_context_create(struct pipe_screen *pscreen, void *priv, unsigned flags);
 void
 etna_context_add_flush_resource(struct etna_context *ctx,
                                 struct pipe_resource *rsc);
-
-void
-etna_flush(struct pipe_context *pctx, struct pipe_fence_handle **fence,
-           enum pipe_flush_flags flags, bool internal);
-
-bool
-etna_render_condition_check(struct pipe_context *pctx);
 
 #endif

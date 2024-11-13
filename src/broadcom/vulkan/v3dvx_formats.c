@@ -26,9 +26,9 @@
 #include "broadcom/cle/v3dx_pack.h"
 
 #include "util/format/u_format.h"
+#include "vulkan/util/vk_util.h"
 #include "vk_enum_to_str.h"
 #include "vk_enum_defines.h"
-#include "vk_util.h"
 
 #define SWIZ(x,y,z,w) {   \
    PIPE_SWIZZLE_##x,      \
@@ -155,7 +155,6 @@ static const struct v3dv_format format_table[] = {
    FORMAT(A8B8G8R8_SRGB_PACK32,    SRGB8_ALPHA8, RGBA8,         SWIZ_XYZW, 16, true), /* RGBA8 sRGB */
    FORMAT(A2B10G10R10_UNORM_PACK32,RGB10_A2,     RGB10_A2,      SWIZ_XYZW, 16, true),
    FORMAT(A2B10G10R10_UINT_PACK32, RGB10_A2UI,   RGB10_A2UI,    SWIZ_XYZW, 16, false),
-   FORMAT(A2R10G10B10_UNORM_PACK32,RGB10_A2,     RGB10_A2,      SWIZ_ZYXW, 16, true),
    FORMAT(E5B9G9R9_UFLOAT_PACK32,  NO,           RGB9_E5,       SWIZ_XYZ1, 16, true),
    FORMAT(B10G11R11_UFLOAT_PACK32, R11F_G11F_B10F,R11F_G11F_B10F, SWIZ_XYZ1, 16, true),
 
@@ -238,16 +237,8 @@ static const struct v3dv_format format_table[] = {
  * ARGB4: YZWX (reverse + swap R/B)
  */
 static const struct v3dv_format format_table_4444[] = {
-   FORMAT(A4B4G4R4_UNORM_PACK16, ABGR4444, RGBA4, SWIZ_WZYX, 16, true), /* Reverse */
-   FORMAT(A4R4G4B4_UNORM_PACK16, ABGR4444, RGBA4, SWIZ_YZWX, 16, true), /* Reverse + RB swap */
-};
-
-/* VK_KHR_maintenance5 introduces A1B5G5R5 and A8 but we only support the
- * former. It might be possible to support A8 as R8 with special casing
- * in a number of places but it would probably take some effort.
- */
-static const struct v3dv_format format_table_maintenance5[] = {
-   FORMAT(A1B5G5R5_UNORM_PACK16_KHR, RGBA5551, A1_RGB5, SWIZ_XYZW, 16, true),
+   FORMAT(A4B4G4R4_UNORM_PACK16_EXT, ABGR4444, RGBA4, SWIZ_WZYX, 16, true), /* Reverse */
+   FORMAT(A4R4G4B4_UNORM_PACK16_EXT, ABGR4444, RGBA4, SWIZ_YZWX, 16, true), /* Reverse + RB swap */
 };
 
 static const struct v3dv_format format_table_ycbcr[] = {
@@ -274,18 +265,10 @@ v3dX(get_format)(VkFormat format)
 
    switch (ext_number) {
    case _VK_EXT_4444_formats_number:
-      if (enum_offset < ARRAY_SIZE(format_table_4444))
-         return &format_table_4444[enum_offset];
-      else
-         return NULL;
+      return &format_table_4444[enum_offset];
    case _VK_KHR_sampler_ycbcr_conversion_number:
       if (enum_offset < ARRAY_SIZE(format_table_ycbcr))
          return &format_table_ycbcr[enum_offset];
-      else
-         return NULL;
-   case _VK_KHR_maintenance5_number:
-      if (enum_offset < ARRAY_SIZE(format_table_maintenance5))
-         return &format_table_maintenance5[enum_offset];
       else
          return NULL;
    default:

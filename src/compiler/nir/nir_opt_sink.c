@@ -30,96 +30,42 @@
 
 #include "nir.h"
 
+
 /*
  * A simple pass that moves some instructions into the least common
  * anscestor of consuming instructions.
  */
 
-/*
- * Detect whether a source is like a constant for the purposes of register
- * pressure calculations (e.g. can be remat anywhere effectively for free).
- */
-static bool
-is_constant_like(nir_src *src)
+bool
+nir_can_move_instr(nir_instr *instr, nir_move_options options)
 {
-   /* Constants are constants */
-   if (nir_src_is_const(*src))
-      return true;
-
-   /* Otherwise, look for constant-like intrinsics */
-   nir_instr *parent = src->ssa->parent_instr;
-   if (parent->type != nir_instr_type_intrinsic)
-      return false;
-
-   return (nir_instr_as_intrinsic(parent)->intrinsic ==
-           nir_intrinsic_load_preamble);
-}
-
-static bool
-can_sink_instr(nir_instr *instr, nir_move_options options, bool *can_mov_out_of_loop)
-{
-   /* Some intrinsic might require uniform sources and
-    * moving out of loops can add divergence.
-    */
-   *can_mov_out_of_loop = true;
    switch (instr->type) {
    case nir_instr_type_load_const:
-   case nir_instr_type_undef: {
+   case nir_instr_type_ssa_undef: {
       return options & nir_move_const_undef;
    }
    case nir_instr_type_alu: {
-      nir_alu_instr *alu = nir_instr_as_alu(instr);
-
-      if (nir_op_is_vec_or_mov(alu->op) || alu->op == nir_op_b2i32)
+      if (nir_op_is_vec(nir_instr_as_alu(instr)->op) ||
+          nir_instr_as_alu(instr)->op == nir_op_b2i32)
          return options & nir_move_copies;
-      if (nir_alu_instr_is_comparison(alu))
+      if (nir_alu_instr_is_comparison(nir_instr_as_alu(instr)))
          return options & nir_move_comparisons;
-
-      /* Assuming that constants do not contribute to register pressure, it is
-       * beneficial to sink ALU instructions where all but one source is
-       * constant. Detect that case last.
-       */
-      if (!(options & nir_move_alu))
-         return false;
-
-      unsigned inputs = nir_op_infos[alu->op].num_inputs;
-      unsigned constant_inputs = 0;
-
-      for (unsigned i = 0; i < inputs; ++i) {
-         if (is_constant_like(&alu->src[i].src))
-            constant_inputs++;
-      }
-
-      return (constant_inputs + 1 >= inputs);
+      return false;
    }
    case nir_instr_type_intrinsic: {
       nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
       switch (intrin->intrinsic) {
       case nir_intrinsic_load_ubo:
       case nir_intrinsic_load_ubo_vec4:
-         *can_mov_out_of_loop = false;
          return options & nir_move_load_ubo;
       case nir_intrinsic_load_ssbo:
-         *can_mov_out_of_loop = false;
          return (options & nir_move_load_ssbo) && nir_intrinsic_can_reorder(intrin);
       case nir_intrinsic_load_input:
-      case nir_intrinsic_load_per_primitive_input:
       case nir_intrinsic_load_interpolated_input:
       case nir_intrinsic_load_per_vertex_input:
-      case nir_intrinsic_load_frag_coord:
-      case nir_intrinsic_load_frag_coord_zw:
-      case nir_intrinsic_load_pixel_coord:
          return options & nir_move_load_input;
       case nir_intrinsic_load_uniform:
-      case nir_intrinsic_load_kernel_input:
          return options & nir_move_load_uniform;
-      case nir_intrinsic_inverse_ballot:
-      case nir_intrinsic_is_subgroup_invocation_lt_amd:
-         *can_mov_out_of_loop = false;
-         return options & nir_move_copies;
-      case nir_intrinsic_load_constant_agx:
-      case nir_intrinsic_load_local_pixel_agx:
-         return true;
       default:
          return false;
       }
@@ -129,22 +75,12 @@ can_sink_instr(nir_instr *instr, nir_move_options options, bool *can_mov_out_of_
    }
 }
 
-bool
-nir_can_move_instr(nir_instr *instr, nir_move_options options)
-{
-   bool out_of_loop;
-   return can_sink_instr(instr, options, &out_of_loop);
-}
-
 static nir_loop *
 get_innermost_loop(nir_cf_node *node)
 {
    for (; node != NULL; node = node->parent) {
-      if (node->type == nir_cf_node_loop) {
-         nir_loop *loop = nir_cf_node_as_loop(node);
-         if (nir_loop_first_block(loop)->predecessors->entries > 1)
-            return loop;
-      }
+      if (node->type == nir_cf_node_loop)
+         return (nir_loop*)node;
    }
    return NULL;
 }
@@ -182,12 +118,11 @@ adjust_block_for_loops(nir_block *use_block, nir_block *def_block,
       }
 
       nir_cf_node *next = nir_cf_node_next(&cur_block->cf_node);
-      if (next && next->type == nir_cf_node_loop &&
-          nir_block_cf_tree_next(cur_block)->predecessors->entries > 1) {
+      if (next && next->type == nir_cf_node_loop) {
          nir_loop *following_loop = nir_cf_node_as_loop(next);
          if (loop_contains_block(following_loop, use_block)) {
-            use_block = cur_block;
-            continue;
+             use_block = cur_block;
+             continue;
          }
       }
    }
@@ -202,12 +137,39 @@ adjust_block_for_loops(nir_block *use_block, nir_block *def_block,
  * the uses
  */
 static nir_block *
-get_preferred_block(nir_def *def, bool sink_out_of_loops)
+get_preferred_block(nir_ssa_def *def, bool sink_out_of_loops)
 {
    nir_block *lca = NULL;
 
    nir_foreach_use_including_if(use, def) {
-      lca = nir_dominance_lca(lca, nir_src_get_block(use));
+      nir_block *use_block;
+
+      if (use->is_if) {
+         use_block =
+            nir_cf_node_as_block(nir_cf_node_prev(&use->parent_if->cf_node));
+      } else {
+         nir_instr *instr = use->parent_instr;
+         use_block = instr->block;
+
+         /*
+          * Kind of an ugly special-case, but phi instructions
+          * need to appear first in the block, so by definition
+          * we can't move an instruction into a block where it is
+          * consumed by a phi instruction.  We could conceivably
+          * move it into a dominator block.
+          */
+         if (instr->type == nir_instr_type_phi) {
+            nir_phi_instr *phi = nir_instr_as_phi(instr);
+            nir_block *phi_lca = NULL;
+            nir_foreach_phi_src(src, phi) {
+               if (&src->src == use)
+                  phi_lca = nir_dominance_lca(phi_lca, src->pred);
+            }
+            use_block = phi_lca;
+         }
+      }
+
+      lca = nir_dominance_lca(lca, use_block);
    }
 
    /* return in case, we didn't find a reachable user */
@@ -225,25 +187,41 @@ get_preferred_block(nir_def *def, bool sink_out_of_loops)
    return lca;
 }
 
+static bool
+can_sink_out_of_loop(nir_intrinsic_instr *intrin)
+{
+   /* Don't sink buffer loads out of loops because that can make its
+    * resource divergent and break code like that which is generated
+    * by nir_lower_non_uniform_access.
+    */
+   return intrin->intrinsic != nir_intrinsic_load_ubo &&
+          intrin->intrinsic != nir_intrinsic_load_ssbo;
+}
+
 bool
 nir_opt_sink(nir_shader *shader, nir_move_options options)
 {
    bool progress = false;
 
-   nir_foreach_function_impl(impl, shader) {
-      nir_metadata_require(impl,
-                           nir_metadata_control_flow);
+   nir_foreach_function(function, shader) {
+      if (!function->impl)
+         continue;
 
-      nir_foreach_block_reverse(block, impl) {
+      nir_metadata_require(function->impl,
+                           nir_metadata_block_index | nir_metadata_dominance);
+
+      nir_foreach_block_reverse(block, function->impl) {
          nir_foreach_instr_reverse_safe(instr, block) {
-            bool sink_out_of_loops;
-            if (!can_sink_instr(instr, options, &sink_out_of_loops))
+            if (!nir_can_move_instr(instr, options))
                continue;
 
-            nir_def *def = nir_instr_def(instr);
+            nir_ssa_def *def = nir_instr_ssa_def(instr);
 
+            bool sink_out_of_loops =
+               instr->type != nir_instr_type_intrinsic ||
+               can_sink_out_of_loop(nir_instr_as_intrinsic(instr));
             nir_block *use_block =
-               get_preferred_block(def, sink_out_of_loops);
+                  get_preferred_block(def, sink_out_of_loops);
 
             if (!use_block || use_block == instr->block)
                continue;
@@ -255,8 +233,8 @@ nir_opt_sink(nir_shader *shader, nir_move_options options)
          }
       }
 
-      nir_metadata_preserve(impl,
-                            nir_metadata_control_flow);
+      nir_metadata_preserve(function->impl,
+                            nir_metadata_block_index | nir_metadata_dominance);
    }
 
    return progress;

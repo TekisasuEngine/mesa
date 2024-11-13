@@ -1,8 +1,8 @@
 # Basic test set
 [[deqp]]
 deqp = "/deqp/modules/gles2/deqp-gles2"
-caselists = ["/deqp/mustpass/gles2-main.txt"]
-skips = ["install/freedreno-a6xx-skips.txt"]
+caselists = ["/deqp/mustpass/gles2-master.txt"]
+skips = ["install/freedreno-a618-premerge-skips.txt"]
 deqp_args = [
     "--deqp-surface-width=256", "--deqp-surface-height=256",
     "--deqp-surface-type=pbuffer", "--deqp-visibility=hidden",
@@ -13,8 +13,8 @@ renderer_check = "FD618"
 
 [[deqp]]
 deqp = "/deqp/modules/gles3/deqp-gles3"
-caselists = ["/deqp/mustpass/gles3-main.txt"]
-skips = ["install/freedreno-a6xx-skips.txt"]
+caselists = ["/deqp/mustpass/gles3-master.txt"]
+skips = ["install/freedreno-a618-premerge-skips.txt"]
 deqp_args = [
     "--deqp-surface-width=256", "--deqp-surface-height=256",
     "--deqp-surface-type=pbuffer", "--deqp-visibility=hidden",
@@ -23,22 +23,8 @@ deqp_args = [
 
 [[deqp]]
 deqp = "/deqp/modules/gles31/deqp-gles31"
-caselists = ["/deqp/mustpass/gles31-main.txt"]
-skips = ["install/freedreno-a6xx-skips.txt"]
-deqp_args = [
-    "--deqp-surface-width=256", "--deqp-surface-height=256",
-    "--deqp-surface-type=pbuffer", "--deqp-visibility=hidden",
-    "--deqp-gl-config-name=rgba8888d24s8ms0",
-]
-
-[[deqp]]
-deqp = "/deqp/external/openglcts/modules/glcts"
-caselists = [
-    "/deqp/mustpass/gles2-khr-main.txt",
-    "/deqp/mustpass/gles3-khr-main.txt",
-    "/deqp/mustpass/gles31-khr-main.txt",
-]
-skips = ["install/freedreno-a6xx-skips.txt"]
+caselists = ["/deqp/mustpass/gles31-master.txt"]
+skips = ["install/freedreno-a618-premerge-skips.txt"]
 deqp_args = [
     "--deqp-surface-width=256", "--deqp-surface-height=256",
     "--deqp-surface-type=pbuffer", "--deqp-visibility=hidden",
@@ -51,9 +37,12 @@ deqp_args = [
 [[deqp]]
 deqp = "/deqp/external/openglcts/modules/glcts"
 caselists = [
-    "/deqp/mustpass/gl46-main.txt",
+    "/deqp/mustpass/gles2-khr-master.txt",
+    "/deqp/mustpass/gles3-khr-master.txt",
+    "/deqp/mustpass/gles31-khr-master.txt",
+    "/deqp/mustpass/gl45-master.txt",
 ]
-skips = ["install/freedreno-a6xx-skips.txt"]
+skips = ["install/freedreno-a618-premerge-skips.txt"]
 deqp_args = [
     "--deqp-surface-width=256", "--deqp-surface-height=256",
     "--deqp-surface-type=pbuffer", "--deqp-visibility=hidden",
@@ -64,8 +53,8 @@ deqp_args = [
 # force-gmem testing
 [[deqp]]
 deqp = "/deqp/modules/gles31/deqp-gles31"
-caselists = ["/deqp/mustpass/gles31-main.txt"]
-skips = ["install/freedreno-a6xx-skips.txt"]
+caselists = ["/deqp/mustpass/gles31-master.txt"]
+skips = ["install/freedreno-a618-premerge-skips.txt"]
 deqp_args = [
     "--deqp-surface-width=256", "--deqp-surface-height=256",
     "--deqp-surface-type=pbuffer", "--deqp-visibility=hidden",
@@ -80,8 +69,8 @@ FD_MESA_DEBUG = "gmem"
 # force-bypass testing
 [[deqp]]
 deqp = "/deqp/modules/gles31/deqp-gles31"
-caselists = ["/deqp/mustpass/gles31-main.txt"]
-skips = ["install/freedreno-a6xx-skips.txt"]
+caselists = ["/deqp/mustpass/gles31-master.txt"]
+skips = ["install/freedreno-a618-premerge-skips.txt"]
 deqp_args = [
     "--deqp-surface-width=256", "--deqp-surface-height=256",
     "--deqp-surface-type=pbuffer", "--deqp-visibility=hidden",
@@ -96,8 +85,8 @@ FD_MESA_DEBUG = "sysmem"
 # noubo testing
 [[deqp]]
 deqp = "/deqp/modules/gles31/deqp-gles31"
-caselists = ["/deqp/mustpass/gles31-main.txt"]
-skips = ["install/freedreno-a6xx-skips.txt"]
+caselists = ["/deqp/mustpass/gles31-master.txt"]
+skips = ["install/freedreno-a618-premerge-skips.txt"]
 include = ["functional.*ubo"]
 deqp_args = [
     "--deqp-surface-width=256", "--deqp-surface-height=256",
@@ -113,7 +102,7 @@ IR3_SHADER_DEBUG = "nouboopt"
 [[deqp]]
 deqp = "/deqp/modules/gles3/deqp-gles3"
 caselists = ["/deqp/mustpass/gles3-565-no-depth-no-stencil.txt"]
-skips = ["install/freedreno-a6xx-skips.txt"]
+skips = ["install/freedreno-a618-premerge-skips.txt"]
 deqp_args = [
     "--deqp-surface-width=256", "--deqp-surface-height=256",
     "--deqp-surface-type=pbuffer", "--deqp-visibility=hidden",
@@ -124,7 +113,7 @@ prefix = "565-nozs-"
 [[deqp]]
 deqp = "/deqp/modules/gles31/deqp-gles31"
 caselists = ["/deqp/mustpass/gles31-565-no-depth-no-stencil.txt"]
-skips = ["install/freedreno-a6xx-skips.txt"]
+skips = ["install/freedreno-a618-premerge-skips.txt"]
 deqp_args = [
     "--deqp-surface-width=256", "--deqp-surface-height=256",
     "--deqp-surface-type=pbuffer", "--deqp-visibility=hidden",
@@ -136,7 +125,7 @@ prefix = "565-nozs-"
 [[deqp]]
 deqp = "/deqp/modules/gles3/deqp-gles3"
 caselists = ["/deqp/mustpass/gles3-multisample.txt"]
-skips = ["install/freedreno-a6xx-skips.txt"]
+skips = ["install/freedreno-a618-premerge-skips.txt"]
 deqp_args = [
     "--deqp-surface-width=256", "--deqp-surface-height=256",
     "--deqp-surface-type=pbuffer", "--deqp-visibility=hidden",
@@ -147,7 +136,7 @@ prefix = "multisample-"
 [[deqp]]
 deqp = "/deqp/modules/gles31/deqp-gles31"
 caselists = ["/deqp/mustpass/gles31-multisample.txt"]
-skips = ["install/freedreno-a6xx-skips.txt"]
+skips = ["install/freedreno-a618-premerge-skips.txt"]
 deqp_args = [
     "--deqp-surface-width=256", "--deqp-surface-height=256",
     "--deqp-surface-type=pbuffer", "--deqp-visibility=hidden",
@@ -158,8 +147,8 @@ prefix = "multisample-"
 # spilling testing
 [[deqp]]
 deqp = "/deqp/modules/gles2/deqp-gles2"
-caselists = ["/deqp/mustpass/gles2-main.txt"]
-skips = ["install/freedreno-a6xx-skips.txt"]
+caselists = ["/deqp/mustpass/gles2-master.txt"]
+skips = ["install/freedreno-a618-premerge-skips.txt"]
 include = ["functional.shaders"]
 deqp_args = [
     "--deqp-surface-width=256", "--deqp-surface-height=256",

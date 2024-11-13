@@ -32,8 +32,6 @@
 
 #include <stdlib.h>
 #include "glsl_symbol_table.h"
-#include "mesa/main/config.h"
-#include "mesa/main/menums.h" /* for gl_api */
 
 /* THIS is a macro defined somewhere deep in the Windows MSVC header files.
  * Undefine it here to avoid collision with the lexer's THIS token.
@@ -77,7 +75,7 @@ typedef struct YYLTYPE {
 # define YYLTYPE_IS_TRIVIAL 1
 
 extern void _mesa_glsl_error(YYLTYPE *locp, _mesa_glsl_parse_state *state,
-                             const char *fmt, ...) PRINTFLIKE(3, 4);
+                             const char *fmt, ...);
 
 
 struct _mesa_glsl_parse_state {
@@ -388,7 +386,7 @@ struct _mesa_glsl_parse_state {
    exec_list translation_unit;
    glsl_symbol_table *symbols;
 
-   linear_ctx *linalloc;
+   void *linalloc;
 
    unsigned num_supported_versions;
    struct {
@@ -776,22 +774,6 @@ struct _mesa_glsl_parse_state {
     */
    bool KHR_blend_equation_advanced_enable;
    bool KHR_blend_equation_advanced_warn;
-   bool KHR_shader_subgroup_arithmetic_enable;
-   bool KHR_shader_subgroup_arithmetic_warn;
-   bool KHR_shader_subgroup_ballot_enable;
-   bool KHR_shader_subgroup_ballot_warn;
-   bool KHR_shader_subgroup_basic_enable;
-   bool KHR_shader_subgroup_basic_warn;
-   bool KHR_shader_subgroup_clustered_enable;
-   bool KHR_shader_subgroup_clustered_warn;
-   bool KHR_shader_subgroup_quad_enable;
-   bool KHR_shader_subgroup_quad_warn;
-   bool KHR_shader_subgroup_shuffle_enable;
-   bool KHR_shader_subgroup_shuffle_warn;
-   bool KHR_shader_subgroup_shuffle_relative_enable;
-   bool KHR_shader_subgroup_shuffle_relative_warn;
-   bool KHR_shader_subgroup_vote_enable;
-   bool KHR_shader_subgroup_vote_warn;
 
    /* OES extensions go here, sorted alphabetically.
     */
@@ -836,8 +818,6 @@ struct _mesa_glsl_parse_state {
     */
    bool AMD_conservative_depth_enable;
    bool AMD_conservative_depth_warn;
-   bool AMD_gpu_shader_half_float_enable;
-   bool AMD_gpu_shader_half_float_warn;
    bool AMD_gpu_shader_int64_enable;
    bool AMD_gpu_shader_int64_warn;
    bool AMD_shader_stencil_export_enable;
@@ -896,8 +876,6 @@ struct _mesa_glsl_parse_state {
    bool EXT_shader_io_blocks_warn;
    bool EXT_shader_samples_identical_enable;
    bool EXT_shader_samples_identical_warn;
-   bool EXT_shadow_samplers_enable;
-   bool EXT_shadow_samplers_warn;
    bool EXT_tessellation_point_size_enable;
    bool EXT_tessellation_point_size_warn;
    bool EXT_tessellation_shader_enable;
@@ -934,10 +912,6 @@ struct _mesa_glsl_parse_state {
    bool NV_shader_noperspective_interpolation_warn;
    bool NV_viewport_array2_enable;
    bool NV_viewport_array2_warn;
-   bool OVR_multiview_enable;
-   bool OVR_multiview_warn;
-   bool OVR_multiview2_enable;
-   bool OVR_multiview2_warn;
    /*@}*/
 
    /** Extensions supported by the OpenGL implementation. */
@@ -985,8 +959,6 @@ struct _mesa_glsl_parse_state {
    bool layer_viewport_relative;
 
    bool allow_extension_directive_midshader;
-   char *alias_shader_extension;
-   bool allow_vertex_texture_bias;
    bool allow_glsl_120_subset_in_110;
    bool allow_builtin_variable_redeclaration;
    bool ignore_write_to_readonly_var;

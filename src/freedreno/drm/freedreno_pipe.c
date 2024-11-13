@@ -1,6 +1,24 @@
 /*
- * Copyright © 2012-2018 Rob Clark <robclark@freedesktop.org>
- * SPDX-License-Identifier: MIT
+ * Copyright (C) 2012-2018 Rob Clark <robclark@freedesktop.org>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  *
  * Authors:
  *    Rob Clark <robclark@freedesktop.org>
@@ -45,7 +63,6 @@ fd_pipe_new2(struct fd_device *dev, enum fd_pipe_id id, uint32_t prio)
    fd_pipe_get_param(pipe, FD_CHIP_ID, &val);
    pipe->dev_id.chip_id = val;
 
-   pipe->is_64bit = fd_dev_64b(&pipe->dev_id);
 
    /* Use the _NOSYNC flags because we don't want the control_mem bo to hold
     * a reference to the ourself.  This also means that we won't be able
@@ -134,9 +151,6 @@ fd_pipe_purge(struct fd_pipe *pipe)
       fd_fence_flush(unflushed_fence);
       fd_fence_del(unflushed_fence);
    }
-
-   if (pipe->funcs->finish)
-      pipe->funcs->finish(pipe);
 }
 
 int
@@ -182,17 +196,8 @@ uint32_t
 fd_pipe_emit_fence(struct fd_pipe *pipe, struct fd_ringbuffer *ring)
 {
    uint32_t fence = ++pipe->last_fence;
-   unsigned gen = fd_dev_gen(&pipe->dev_id);
 
-   if (gen >= A7XX) {
-      OUT_PKT7(ring, CP_EVENT_WRITE7, 4);
-      OUT_RING(ring, CP_EVENT_WRITE_0_EVENT(CACHE_FLUSH_TS) |
-               CP_EVENT_WRITE7_0_WRITE_SRC(EV_WRITE_USER_32B) |
-               CP_EVENT_WRITE7_0_WRITE_DST(EV_DST_RAM) |
-               CP_EVENT_WRITE7_0_WRITE_ENABLED);
-      OUT_RELOC(ring, control_ptr(pipe, fence));   /* ADDR_LO/HI */
-      OUT_RING(ring, fence);
-   } else if (gen >= A5XX) {
+   if (fd_dev_64b(&pipe->dev_id)) {
       OUT_PKT7(ring, CP_EVENT_WRITE, 4);
       OUT_RING(ring, CP_EVENT_WRITE_0_EVENT(CACHE_FLUSH_TS));
       OUT_RELOC(ring, control_ptr(pipe, fence));   /* ADDR_LO/HI */

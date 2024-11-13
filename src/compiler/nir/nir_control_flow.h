@@ -79,6 +79,7 @@ nir_cf_node_insert_end(struct exec_list *list, nir_cf_node *node)
    nir_cf_node_insert(nir_after_cf_list(list), node);
 }
 
+
 /** Control flow motion.
  *
  * These functions let you take a part of a control flow list (basically
@@ -168,18 +169,6 @@ nir_cf_node_remove(nir_cf_node *node)
 {
    nir_cf_list list;
    nir_cf_extract(&list, nir_before_cf_node(node), nir_after_cf_node(node));
-   nir_cf_delete(&list);
-}
-
-static inline void
-nir_remove_after_cf_node(nir_cf_node *node)
-{
-   nir_cf_node *end = node;
-   while (!nir_cf_node_is_last(end))
-      end = nir_cf_node_next(end);
-
-   nir_cf_list list;
-   nir_cf_extract(&list, nir_after_cf_node(node), nir_after_cf_node(end));
    nir_cf_delete(&list);
 }
 

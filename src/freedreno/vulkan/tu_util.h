@@ -11,7 +11,6 @@
 
 #include "tu_common.h"
 
-#include "util/macros.h"
 #include "util/u_math.h"
 #include "util/format/u_format_pack.h"
 #include "util/format/u_format_zs.h"
@@ -34,7 +33,7 @@ enum tu_debug_flags
    TU_DEBUG_PERFC = 1 << 9,
    TU_DEBUG_FLUSHALL = 1 << 10,
    TU_DEBUG_SYNCDRAW = 1 << 11,
-   TU_DEBUG_PUSH_CONSTS_PER_STAGE = 1 << 12,
+   /* bit 12 is available */
    TU_DEBUG_GMEM = 1 << 13,
    TU_DEBUG_RAST_ORDER = 1 << 14,
    TU_DEBUG_UNALIGNED_STORE = 1 << 15,
@@ -44,13 +43,6 @@ enum tu_debug_flags
    TU_DEBUG_NOLRZFC = 1 << 19,
    TU_DEBUG_DYNAMIC = 1 << 20,
    TU_DEBUG_BOS = 1 << 21,
-   TU_DEBUG_3D_LOAD = 1 << 22,
-   TU_DEBUG_FDM = 1 << 23,
-   TU_DEBUG_NOCONFORM = 1 << 24,
-   TU_DEBUG_RD = 1 << 25,
-   TU_DEBUG_HIPRIO = 1 << 26,
-   TU_DEBUG_NO_CONCURRENT_RESOLVES = 1 << 27,
-   TU_DEBUG_NO_CONCURRENT_UNRESOLVES = 1 << 28,
 };
 
 struct tu_env {
@@ -70,16 +62,18 @@ tu_env_init(void);
 VkResult
 __vk_startup_errorf(struct tu_instance *instance,
                     VkResult error,
+                    bool force_print,
                     const char *file,
                     int line,
                     const char *format,
-                    ...) PRINTFLIKE(5, 6);
+                    ...) PRINTFLIKE(6, 7);
 
 /* Prints startup errors if TU_DEBUG=startup is set or on a debug driver
  * build.
  */
 #define vk_startup_errorf(instance, error, format, ...) \
    __vk_startup_errorf(instance, error, \
+                       TU_DEBUG(STARTUP), \
                        __FILE__, __LINE__, format, ##__VA_ARGS__)
 
 void
@@ -359,7 +353,7 @@ tu6_polygon_mode(VkPolygonMode mode)
 }
 
 struct bcolor_entry {
-   alignas(128) uint32_t fp32[4];
+   uint32_t fp32[4];
    uint64_t ui16;
    uint64_t si16;
    uint64_t fp16;
@@ -373,8 +367,7 @@ struct bcolor_entry {
    uint32_t z24; /* also s8? */
    uint64_t srgb;
    uint8_t  __pad1[56];
-};
-static_assert(alignof(struct bcolor_entry) == 128, "");
+} __attribute__((aligned(128)));
 
 /* vulkan does not want clamping of integer clear values, differs from u_format
  * see spec for VkClearColorValue

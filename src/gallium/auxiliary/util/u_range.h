@@ -76,19 +76,13 @@ util_range_add(struct pipe_resource *resource, struct util_range *range,
    }
 }
 
-static inline bool
+static inline boolean
 util_ranges_intersect(const struct util_range *range,
                       unsigned start, unsigned end)
 {
    return MAX2(start, range->start) < MIN2(end, range->end);
 }
 
-static inline bool
-util_ranges_covered(const struct util_range *range,
-                    unsigned start, unsigned end)
-{
-   return (start <= range->start) && (end >= range->end);
-}
 
 /* Init/deinit */
 

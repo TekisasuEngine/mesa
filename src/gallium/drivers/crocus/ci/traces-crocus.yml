@@ -24,13 +24,12 @@ traces:
       checksum: c7c3df989f88852e88bef101b5c1dc22
     crocus-hsw:
       checksum: bb84373a69751942956d2320cff6dd1d
-# gimark requires an environment var to work around a bug, disable for now
-#  gputest/gimark-v2.trace:
-#    crocus-g41:
-#      label: [unsupported]
-#    crocus-hsw:
-#      label: [skip, flakes]
-#      text: lighting comes in from a different direction than on freedreno?
+  gputest/gimark-v2.trace:
+    crocus-g41:
+      label: [unsupported]
+    crocus-hsw:
+      label: [skip, flakes]
+      text: lighting comes in from a different direction than on freedreno?
   gputest/pixmark-julia-fp32-v2.trace:
     crocus-g41:
       checksum: 03776a063ee7049256acd414239a7f13
@@ -41,6 +40,11 @@ traces:
       label: [unsupported]
     crocus-hsw:
       checksum: 7e4948c361528a7873dad9712f629770
+  gputest/pixmark-piano-v2.trace:
+    crocus-g41:
+      label: [hang]
+    crocus-hsw:
+      label: [hang]
   gputest/pixmark-volplosion-v2.trace:
     crocus-g41:
       checksum: 6fc94a69b9e1f38693ea3ed4f530c7da
@@ -85,8 +89,7 @@ traces:
     crocus-g41:
       checksum: 0f14a88f511cd886c920238c80017e5d
     crocus-hsw:
-      checksum: d77b3697a9b1a47611cde275aa6cb912
-      text: "https://gitlab.freedesktop.org/mesa/mesa/-/issues/9159"
+      checksum: ec6b2615ab12db73126e06e6b20663ec
   paraview/pv-manyspheres-v2.trace:
     crocus-hsw:
       checksum: 73e5d34fb13268b0c7126297bfc34965
@@ -112,7 +115,7 @@ traces:
       label: [skip, flakes]
   supertuxkart/supertuxkart-mansion-egl-gles-v2.trace:
     crocus-hsw:
-      checksum: c59dc93744d2dfcf172aa3f26ce2a62e
+      checksum: c219d20ed5f701c4d4194e762501d4fd
   valve/counterstrike-v2.trace:
     crocus-g41:
       checksum: 90c01e73b3544cb477ac6109bc61bef1
@@ -160,6 +163,13 @@ traces:
       label: [unsupported]
     crocus-hsw:
       checksum: c07530897dc5a6882cbf35737334336b
+  freedoom/freedoom-phase2-gl-high.trace:
+    crocus-g41:
+      label: [unsupported]
+    crocus-hsw:
+      label: [skip, crash]
+      checksum: 997ec70d945fdbda8a98efe831000338
+      text: "abort() called"
   unvanquished/unvanquished-lowest.trace:
     crocus-g41:
       label: [unsupported]
@@ -171,9 +181,7 @@ traces:
     crocus-g41:
       label: [unsupported]
     crocus-hsw:
-      label: [skip, flakes]
       checksum: 99b3ec85e4b9335c3cffc49a63c0c62c
-      text: "Text glyphs render incorrectly sometimes."
   warzone2100/warzone2100-default.trace:
     crocus-g41:
       label: [unsupported]

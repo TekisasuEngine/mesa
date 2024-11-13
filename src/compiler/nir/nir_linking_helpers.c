@@ -21,10 +21,10 @@
  * IN THE SOFTWARE.
  */
 
-#include "util/hash_table.h"
-#include "util/set.h"
 #include "nir.h"
 #include "nir_builder.h"
+#include "util/set.h"
+#include "util/hash_table.h"
 
 /* This file contains various little helpers for doing simple linking in
  * NIR.  Eventually, we'll probably want a full-blown varying packing
@@ -41,7 +41,8 @@ get_variable_io_mask(nir_variable *var, gl_shader_stage stage)
    if (var->data.location < 0)
       return 0;
 
-   unsigned location = var->data.patch ? var->data.location - VARYING_SLOT_PATCH0 : var->data.location;
+   unsigned location = var->data.patch ?
+      var->data.location - VARYING_SLOT_PATCH0 : var->data.location;
 
    assert(var->data.mode == nir_var_shader_in ||
           var->data.mode == nir_var_shader_out);
@@ -77,10 +78,13 @@ get_num_components(nir_variable *var)
 }
 
 static void
-add_output_reads(nir_shader *shader, uint64_t *read, uint64_t *patches_read)
+tcs_add_output_reads(nir_shader *shader, uint64_t *read, uint64_t *patches_read)
 {
-   nir_foreach_function_impl(impl, shader) {
-      nir_foreach_block(block, impl) {
+   nir_foreach_function(function, shader) {
+      if (!function->impl)
+         continue;
+
+      nir_foreach_block(block, function->impl) {
          nir_foreach_instr(instr, block) {
             if (instr->type != nir_instr_type_intrinsic)
                continue;
@@ -111,44 +115,6 @@ add_output_reads(nir_shader *shader, uint64_t *read, uint64_t *patches_read)
    }
 }
 
-static bool
-remove_unused_io_access(nir_builder *b, nir_intrinsic_instr *intrin, void *cb_data)
-{
-   nir_variable_mode mode = *(nir_variable_mode *)cb_data;
-
-   unsigned srcn = 0;
-   switch (intrin->intrinsic) {
-   case nir_intrinsic_load_deref:
-   case nir_intrinsic_store_deref:
-   case nir_intrinsic_interp_deref_at_centroid:
-   case nir_intrinsic_interp_deref_at_sample:
-   case nir_intrinsic_interp_deref_at_offset:
-   case nir_intrinsic_interp_deref_at_vertex:
-      break;
-   case nir_intrinsic_copy_deref:
-      srcn = mode == nir_var_shader_in ? 1 : 0;
-      break;
-   default:
-      return false;
-   }
-
-   nir_variable *var = nir_intrinsic_get_var(intrin, srcn);
-   if (!var || var->data.mode != mode || var->data.location != NUM_TOTAL_VARYING_SLOTS)
-      return false;
-
-   if (intrin->intrinsic != nir_intrinsic_store_deref &&
-       intrin->intrinsic != nir_intrinsic_copy_deref) {
-      b->cursor = nir_before_instr(&intrin->instr);
-      nir_def *undef = nir_undef(b, intrin->num_components, intrin->def.bit_size);
-      nir_def_rewrite_uses(&intrin->def, undef);
-   }
-
-   nir_instr_remove(&intrin->instr);
-   nir_deref_instr_remove_if_unused(nir_src_as_deref(intrin->src[srcn]));
-
-   return true;
-}
-
 /**
  * Helper for removing unused shader I/O variables, by demoting them to global
  * variables (which may then by dead code eliminated).
@@ -158,6 +124,11 @@ remove_unused_io_access(nir_builder *b, nir_intrinsic_instr *intrin, void *cb_da
  * progress = nir_remove_unused_io_vars(producer, nir_var_shader_out,
  *                                      read, patches_read) ||
  *                                      progress;
+ *
+ * The "used" should be an array of 4 uint64_ts (probably of VARYING_BIT_*)
+ * representing each .location_frac used.  Note that for vector variables,
+ * only the first channel (.location_frac) is examined for deciding if the
+ * variable is used!
  */
 bool
 nir_remove_unused_io_vars(nir_shader *shader,
@@ -170,20 +141,15 @@ nir_remove_unused_io_vars(nir_shader *shader,
 
    assert(mode == nir_var_shader_in || mode == nir_var_shader_out);
 
-   uint64_t read[4] = { 0 };
-   uint64_t patches_read[4] = { 0 };
-   if (mode == nir_var_shader_out)
-      add_output_reads(shader, read, patches_read);
-
    nir_foreach_variable_with_modes_safe(var, shader, mode) {
       if (var->data.patch)
          used = used_by_other_stage_patches;
       else
          used = used_by_other_stage;
 
-      if (var->data.location < VARYING_SLOT_VAR0 && var->data.location >= 0 &&
-          !(shader->info.stage == MESA_SHADER_MESH && var->data.location == VARYING_SLOT_PRIMITIVE_ID))
-         continue;
+      if (var->data.location < VARYING_SLOT_VAR0 && var->data.location >= 0)
+         if (shader->info.stage != MESA_SHADER_MESH || var->data.location != VARYING_SLOT_PRIMITIVE_ID)
+            continue;
 
       if (var->data.always_active_io)
          continue;
@@ -191,26 +157,28 @@ nir_remove_unused_io_vars(nir_shader *shader,
       if (var->data.explicit_xfb_buffer)
          continue;
 
-      uint64_t other_stage = 0;
-      uint64_t this_stage = 0;
-      for (unsigned i = 0; i < get_num_components(var); i++) {
-         other_stage |= used[var->data.location_frac + i];
-         this_stage |= (var->data.patch ? patches_read : read)[var->data.location_frac + i];
-      }
+      uint64_t other_stage = used[var->data.location_frac];
 
-      uint64_t var_mask = get_variable_io_mask(var, shader->info.stage);
-      if (!((other_stage | this_stage) & var_mask)) {
-         /* Mark the variable as removed by setting the location to an invalid value. */
-         var->data.location = NUM_TOTAL_VARYING_SLOTS;
-         exec_node_remove(&var->node);
+      if (!(other_stage & get_variable_io_mask(var, shader->info.stage))) {
+         /* This one is invalid, make it a global variable instead */
+         if (shader->info.stage == MESA_SHADER_MESH &&
+               (shader->info.outputs_read & BITFIELD64_BIT(var->data.location)))
+            var->data.mode = nir_var_mem_shared;
+         else
+            var->data.mode = nir_var_shader_temp;
+         var->data.location = 0;
+
          progress = true;
       }
    }
 
+   nir_function_impl *impl = nir_shader_get_entrypoint(shader);
    if (progress) {
-      nir_shader_intrinsics_pass(shader, &remove_unused_io_access, nir_metadata_control_flow, &mode);
+      nir_metadata_preserve(impl, nir_metadata_dominance |
+                            nir_metadata_block_index);
+      nir_fixup_deref_modes(shader);
    } else {
-      nir_shader_preserve_all_metadata(shader);
+      nir_metadata_preserve(impl, nir_metadata_all);
    }
 
    return progress;
@@ -255,13 +223,19 @@ nir_remove_unused_varyings(nir_shader *producer, nir_shader *consumer)
       }
    }
 
+   /* Each TCS invocation can read data written by other TCS invocations,
+    * so even if the outputs are not used by the TES we must also make
+    * sure they are not read by the TCS before demoting them to globals.
+    */
+   if (producer->info.stage == MESA_SHADER_TESS_CTRL)
+      tcs_add_output_reads(producer, read, patches_read);
+
    bool progress = false;
    progress = nir_remove_unused_io_vars(producer, nir_var_shader_out, read,
                                         patches_read);
 
    progress = nir_remove_unused_io_vars(consumer, nir_var_shader_in, written,
-                                        patches_written) ||
-              progress;
+                                        patches_written) || progress;
 
    return progress;
 }
@@ -282,9 +256,9 @@ get_interp_type(nir_variable *var, const struct glsl_type *type,
       return INTERP_MODE_NONE;
 }
 
-#define INTERPOLATE_LOC_SAMPLE   0
+#define INTERPOLATE_LOC_SAMPLE 0
 #define INTERPOLATE_LOC_CENTROID 1
-#define INTERPOLATE_LOC_CENTER   2
+#define INTERPOLATE_LOC_CENTER 2
 
 static uint8_t
 get_interp_loc(nir_variable *var)
@@ -309,7 +283,8 @@ is_packing_supported_for_type(const struct glsl_type *type)
    return glsl_type_is_scalar(type) && glsl_type_is_32bit(type);
 }
 
-struct assigned_comps {
+struct assigned_comps
+{
    uint8_t comps;
    uint8_t interp_type;
    uint8_t interp_loc;
@@ -352,7 +327,8 @@ get_unmoveable_components_masks(nir_shader *shader,
          unsigned location = var->data.location - VARYING_SLOT_VAR0;
 
          unsigned elements =
-            glsl_type_is_vector_or_scalar(glsl_without_array(type)) ? glsl_get_vector_elements(glsl_without_array(type)) : 4;
+            glsl_type_is_vector_or_scalar(glsl_without_array(type)) ?
+            glsl_get_vector_elements(glsl_without_array(type)) : 4;
 
          bool dual_slot = glsl_type_is_dual_slot(glsl_without_array(type));
          unsigned slots = glsl_count_attribute_slots(type, false);
@@ -393,7 +369,8 @@ get_unmoveable_components_masks(nir_shader *shader,
    }
 }
 
-struct varying_loc {
+struct varying_loc
+{
    uint8_t component;
    uint32_t location;
 };
@@ -405,7 +382,7 @@ mark_all_used_slots(nir_variable *var, uint64_t *slots_used,
    unsigned loc_offset = var->data.patch ? VARYING_SLOT_PATCH0 : 0;
 
    slots_used[var->data.patch ? 1 : 0] |= slots_used_mask &
-                                          BITFIELD64_RANGE(var->data.location - loc_offset, num_slots);
+      BITFIELD64_RANGE(var->data.location - loc_offset, num_slots);
 }
 
 static void
@@ -422,10 +399,10 @@ remap_slots_and_components(nir_shader *shader, nir_variable_mode mode,
                            struct varying_loc (*remap)[4],
                            uint64_t *slots_used, uint64_t *out_slots_read,
                            uint32_t *p_slots_used, uint32_t *p_out_slots_read)
-{
+ {
    const gl_shader_stage stage = shader->info.stage;
-   uint64_t out_slots_read_tmp[2] = { 0 };
-   uint64_t slots_used_tmp[2] = { 0 };
+   uint64_t out_slots_read_tmp[2] = {0};
+   uint64_t slots_used_tmp[2] = {0};
 
    /* We don't touch builtins so just copy the bitmask */
    slots_used_tmp[0] = *slots_used & BITFIELD64_RANGE(0, VARYING_SLOT_VAR0);
@@ -514,8 +491,8 @@ struct varying_component {
 static int
 cmp_varying_component(const void *comp1_v, const void *comp2_v)
 {
-   struct varying_component *comp1 = (struct varying_component *)comp1_v;
-   struct varying_component *comp2 = (struct varying_component *)comp2_v;
+   struct varying_component *comp1 = (struct varying_component *) comp1_v;
+   struct varying_component *comp2 = (struct varying_component *) comp2_v;
 
    /* We want patches to be order at the end of the array */
    if (comp1->is_patch != comp2->is_patch)
@@ -561,7 +538,7 @@ gather_varying_component_info(nir_shader *producer, nir_shader *consumer,
                               unsigned *varying_comp_info_size,
                               bool default_to_smooth_interp)
 {
-   unsigned store_varying_info_idx[MAX_VARYINGS_INCL_PATCH][4] = { { 0 } };
+   unsigned store_varying_info_idx[MAX_VARYINGS_INCL_PATCH][4] = {{0}};
    unsigned num_of_comps_to_pack = 0;
 
    /* Count the number of varying that can be packed and create a mapping
@@ -621,12 +598,6 @@ gather_varying_component_info(nir_shader *producer, nir_shader *consumer,
          if (in_var->data.location < VARYING_SLOT_VAR0)
             continue;
 
-         /* Do not remap per-vertex shader inputs because it's an array of
-          * 3-elements and this isn't supported.
-          */
-         if (in_var->data.per_vertex)
-            continue;
-
          unsigned location = in_var->data.location - VARYING_SLOT_VAR0;
          if (location >= MAX_VARYINGS_INCL_PATCH)
             continue;
@@ -637,7 +608,7 @@ gather_varying_component_info(nir_shader *producer, nir_shader *consumer,
             continue;
 
          struct varying_component *vc_info =
-            &(*varying_comp_info)[var_info_idx - 1];
+            &(*varying_comp_info)[var_info_idx-1];
 
          if (!vc_info->initialised) {
             const struct glsl_type *type = in_var->type;
@@ -655,8 +626,8 @@ gather_varying_component_info(nir_shader *producer, nir_shader *consumer,
             vc_info->is_patch = in_var->data.patch;
             vc_info->is_per_primitive = in_var->data.per_primitive;
             vc_info->is_mediump = !producer->options->linker_ignore_precision &&
-                                  (in_var->data.precision == GLSL_PRECISION_MEDIUM ||
-                                   in_var->data.precision == GLSL_PRECISION_LOW);
+               (in_var->data.precision == GLSL_PRECISION_MEDIUM ||
+                in_var->data.precision == GLSL_PRECISION_LOW);
             vc_info->is_intra_stage_only = false;
             vc_info->initialised = true;
          }
@@ -704,7 +675,7 @@ gather_varying_component_info(nir_shader *producer, nir_shader *consumer,
             }
 
             struct varying_component *vc_info =
-               &(*varying_comp_info)[var_info_idx - 1];
+               &(*varying_comp_info)[var_info_idx-1];
 
             if (!vc_info->initialised) {
                const struct glsl_type *type = out_var->type;
@@ -721,8 +692,8 @@ gather_varying_component_info(nir_shader *producer, nir_shader *consumer,
                vc_info->is_patch = out_var->data.patch;
                vc_info->is_per_primitive = out_var->data.per_primitive;
                vc_info->is_mediump = !producer->options->linker_ignore_precision &&
-                                     (out_var->data.precision == GLSL_PRECISION_MEDIUM ||
-                                      out_var->data.precision == GLSL_PRECISION_LOW);
+                  (out_var->data.precision == GLSL_PRECISION_MEDIUM ||
+                   out_var->data.precision == GLSL_PRECISION_LOW);
                vc_info->is_intra_stage_only = true;
                vc_info->initialised = true;
             }
@@ -730,7 +701,7 @@ gather_varying_component_info(nir_shader *producer, nir_shader *consumer,
       }
    }
 
-   for (unsigned i = 0; i < *varying_comp_info_size; i++) {
+   for (unsigned i = 0; i < *varying_comp_info_size; i++ ) {
       struct varying_component *vc_info = &(*varying_comp_info)[i];
       if (!vc_info->initialised) {
          /* Something went wrong, the shader interfaces didn't match, so
@@ -744,25 +715,59 @@ gather_varying_component_info(nir_shader *producer, nir_shader *consumer,
 }
 
 static bool
-allow_pack_interp_type(nir_io_options options, int type)
+allow_pack_interp_type(nir_pack_varying_options options, int type)
 {
+   int sel;
+
    switch (type) {
    case INTERP_MODE_NONE:
+      sel = nir_pack_varying_interp_mode_none;
+      break;
    case INTERP_MODE_SMOOTH:
+      sel = nir_pack_varying_interp_mode_smooth;
+      break;
+   case INTERP_MODE_FLAT:
+      sel = nir_pack_varying_interp_mode_flat;
+      break;
    case INTERP_MODE_NOPERSPECTIVE:
-      return options & nir_io_has_flexible_input_interpolation_except_flat;
+      sel = nir_pack_varying_interp_mode_noperspective;
+      break;
    default:
       return false;
    }
+
+   return options & sel;
+}
+
+static bool
+allow_pack_interp_loc(nir_pack_varying_options options, int loc)
+{
+   int sel;
+
+   switch (loc) {
+   case INTERPOLATE_LOC_SAMPLE:
+      sel = nir_pack_varying_interp_loc_sample;
+      break;
+   case INTERPOLATE_LOC_CENTROID:
+      sel = nir_pack_varying_interp_loc_centroid;
+      break;
+   case INTERPOLATE_LOC_CENTER:
+      sel = nir_pack_varying_interp_loc_center;
+      break;
+   default:
+      return false;
+   }
+
+   return options & sel;
 }
 
 static void
-   assign_remap_locations(struct varying_loc (*remap)[4],
-                          struct assigned_comps *assigned_comps,
-                          struct varying_component *info,
-                          unsigned *cursor, unsigned *comp,
-                          unsigned max_location,
-                          nir_io_options options)
+assign_remap_locations(struct varying_loc (*remap)[4],
+                       struct assigned_comps *assigned_comps,
+                       struct varying_component *info,
+                       unsigned *cursor, unsigned *comp,
+                       unsigned max_location,
+                       nir_pack_varying_options options)
 {
    unsigned tmp_cursor = *cursor;
    unsigned tmp_comp = *comp;
@@ -796,7 +801,8 @@ static void
           * if driver does not support it.
           */
          if (assigned_comps[tmp_cursor].interp_loc != info->interp_loc &&
-             !(options & nir_io_has_flexible_input_interpolation_except_flat)) {
+             (!allow_pack_interp_loc(options, assigned_comps[tmp_cursor].interp_loc) ||
+              !allow_pack_interp_loc(options, info->interp_loc))) {
             tmp_comp = 0;
             continue;
          }
@@ -851,7 +857,7 @@ compact_components(nir_shader *producer, nir_shader *consumer,
                    struct assigned_comps *assigned_comps,
                    bool default_to_smooth_interp)
 {
-   struct varying_loc remap[MAX_VARYINGS_INCL_PATCH][4] = { { { 0 }, { 0 } } };
+   struct varying_loc remap[MAX_VARYINGS_INCL_PATCH][4] = {{{0}, {0}}};
    struct varying_component *varying_comp_info;
    unsigned varying_comp_info_size;
 
@@ -864,11 +870,13 @@ compact_components(nir_shader *producer, nir_shader *consumer,
    qsort(varying_comp_info, varying_comp_info_size,
          sizeof(struct varying_component), cmp_varying_component);
 
+   nir_pack_varying_options options = consumer->options->pack_varying_options;
+
    unsigned cursor = 0;
    unsigned comp = 0;
 
    /* Set the remap array based on the sorted components */
-   for (unsigned i = 0; i < varying_comp_info_size; i++) {
+   for (unsigned i = 0; i < varying_comp_info_size; i++ ) {
       struct varying_component *info = &varying_comp_info[i];
 
       assert(info->is_patch || cursor < MAX_VARYING);
@@ -884,11 +892,11 @@ compact_components(nir_shader *producer, nir_shader *consumer,
 
          assign_remap_locations(remap, assigned_comps, info,
                                 &cursor, &comp, MAX_VARYINGS_INCL_PATCH,
-                                consumer->options->io_options);
+                                options);
       } else {
          assign_remap_locations(remap, assigned_comps, info,
                                 &cursor, &comp, MAX_VARYING,
-                                consumer->options->io_options);
+                                options);
 
          /* Check if we failed to assign a remap location. This can happen if
           * for example there are a bunch of unmovable components with
@@ -902,7 +910,7 @@ compact_components(nir_shader *producer, nir_shader *consumer,
             comp = 0;
             assign_remap_locations(remap, assigned_comps, info,
                                    &cursor, &comp, MAX_VARYING,
-                                   consumer->options->io_options);
+                                   options);
          }
       }
    }
@@ -938,7 +946,7 @@ nir_compact_varyings(nir_shader *producer, nir_shader *consumer,
    assert(producer->info.stage != MESA_SHADER_FRAGMENT);
    assert(consumer->info.stage != MESA_SHADER_VERTEX);
 
-   struct assigned_comps assigned_comps[MAX_VARYINGS_INCL_PATCH] = { { 0 } };
+   struct assigned_comps assigned_comps[MAX_VARYINGS_INCL_PATCH] = {{0}};
 
    get_unmoveable_components_masks(producer, nir_var_shader_out,
                                    assigned_comps,
@@ -990,8 +998,7 @@ static bool
 does_varying_match(nir_variable *out_var, nir_variable *in_var)
 {
    return in_var->data.location == out_var->data.location &&
-          in_var->data.location_frac == out_var->data.location_frac &&
-          in_var->type == out_var->type;
+          in_var->data.location_frac == out_var->data.location_frac;
 }
 
 static nir_variable *
@@ -1036,9 +1043,11 @@ replace_varying_input_by_constant_load(nir_shader *shader,
 {
    nir_function_impl *impl = nir_shader_get_entrypoint(shader);
 
-   nir_builder b = nir_builder_create(impl);
+   nir_builder b;
+   nir_builder_init(&b, impl);
 
-   nir_variable *out_var = nir_intrinsic_get_var(store_intr, 0);
+   nir_variable *out_var =
+      nir_deref_instr_get_variable(nir_src_as_deref(store_intr->src[0]));
 
    bool progress = false;
    nir_foreach_block(block, impl) {
@@ -1065,11 +1074,11 @@ replace_varying_input_by_constant_load(nir_shader *shader,
             nir_instr_as_load_const(store_intr->src[1].ssa->parent_instr);
 
          /* Add new const to replace the input */
-         nir_def *nconst = nir_build_imm(&b, store_intr->num_components,
-                                         intr->def.bit_size,
-                                         out_const->value);
+         nir_ssa_def *nconst = nir_build_imm(&b, store_intr->num_components,
+                                             intr->dest.ssa.bit_size,
+                                             out_const->value);
 
-         nir_def_rewrite_uses(&intr->def, nconst);
+         nir_ssa_def_rewrite_uses(&intr->dest.ssa, nconst);
 
          progress = true;
       }
@@ -1080,15 +1089,17 @@ replace_varying_input_by_constant_load(nir_shader *shader,
 
 static bool
 replace_duplicate_input(nir_shader *shader, nir_variable *input_var,
-                        nir_intrinsic_instr *dup_store_intr)
+                         nir_intrinsic_instr *dup_store_intr)
 {
    assert(input_var);
 
    nir_function_impl *impl = nir_shader_get_entrypoint(shader);
 
-   nir_builder b = nir_builder_create(impl);
+   nir_builder b;
+   nir_builder_init(&b, impl);
 
-   nir_variable *dup_out_var = nir_intrinsic_get_var(dup_store_intr, 0);
+   nir_variable *dup_out_var =
+      nir_deref_instr_get_variable(nir_src_as_deref(dup_store_intr->src[0]));
 
    bool progress = false;
    nir_foreach_block(block, impl) {
@@ -1108,14 +1119,13 @@ replace_duplicate_input(nir_shader *shader, nir_variable *input_var,
 
          if (!does_varying_match(dup_out_var, in_var) ||
              in_var->data.interpolation != input_var->data.interpolation ||
-             get_interp_loc(in_var) != get_interp_loc(input_var) ||
-             in_var->data.per_vertex)
+             get_interp_loc(in_var) != get_interp_loc(input_var))
             continue;
 
          b.cursor = nir_before_instr(instr);
 
-         nir_def *load = nir_load_var(&b, input_var);
-         nir_def_rewrite_uses(&intr->def, load);
+         nir_ssa_def *load = nir_load_var(&b, input_var);
+         nir_ssa_def_rewrite_uses(&intr->dest.ssa, load);
 
          progress = true;
       }
@@ -1125,7 +1135,7 @@ replace_duplicate_input(nir_shader *shader, nir_variable *input_var,
 }
 
 static bool
-is_direct_uniform_load(nir_def *def, nir_scalar *s)
+is_direct_uniform_load(nir_ssa_def *def, nir_ssa_scalar *s)
 {
    /* def is sure to be scalar as can_replace_varying() filter out vector case. */
    assert(def->num_components == 1);
@@ -1139,9 +1149,9 @@ is_direct_uniform_load(nir_def *def, nir_scalar *s)
     *     vec1 32 ssa_4 = deref_var &color_out (shader_out float)
     *     intrinsic store_deref (ssa_4, ssa_3) (1, 0)
     */
-   *s = nir_scalar_resolved(def, 0);
+   *s = nir_ssa_scalar_resolved(def, 0);
 
-   nir_def *ssa = s->def;
+   nir_ssa_def *ssa = s->def;
    if (ssa->parent_instr->type != nir_instr_type_intrinsic)
       return false;
 
@@ -1158,21 +1168,14 @@ is_direct_uniform_load(nir_def *def, nir_scalar *s)
    return !nir_deref_instr_has_indirect(deref);
 }
 
-/**
- * Add a uniform variable from one shader to a different shader.
- *
- * \param nir     The shader where to add the uniform
- * \param uniform The uniform that's declared in another shader.
- */
-nir_variable *
-nir_clone_uniform_variable(nir_shader *nir, nir_variable *uniform, bool spirv)
+static nir_variable *
+get_uniform_var_in_consumer(nir_shader *consumer,
+                            nir_variable *var_in_producer)
 {
    /* Find if uniform already exists in consumer. */
    nir_variable *new_var = NULL;
-   nir_foreach_variable_with_modes(v, nir, uniform->data.mode) {
-      if ((spirv && uniform->data.mode & nir_var_mem_ubo &&
-           v->data.binding == uniform->data.binding) ||
-          (!spirv && !strcmp(uniform->name, v->name))) {
+   nir_foreach_uniform_variable(v, consumer) {
+      if (!strcmp(var_in_producer->name, v->name)) {
          new_var = v;
          break;
       }
@@ -1180,22 +1183,21 @@ nir_clone_uniform_variable(nir_shader *nir, nir_variable *uniform, bool spirv)
 
    /* Create a variable if not exist. */
    if (!new_var) {
-      new_var = nir_variable_clone(uniform, nir);
-      nir_shader_add_variable(nir, new_var);
+      new_var = nir_variable_clone(var_in_producer, consumer);
+      nir_shader_add_variable(consumer, new_var);
    }
 
    return new_var;
 }
 
-nir_deref_instr *
-nir_clone_deref_instr(nir_builder *b, nir_variable *var,
-                      nir_deref_instr *deref)
+static nir_deref_instr *
+clone_deref_instr(nir_builder *b, nir_variable *var, nir_deref_instr *deref)
 {
    if (deref->deref_type == nir_deref_type_var)
-      return nir_build_deref_var(b, var);
+       return nir_build_deref_var(b, var);
 
    nir_deref_instr *parent_deref = nir_deref_instr_parent(deref);
-   nir_deref_instr *parent = nir_clone_deref_instr(b, var, parent_deref);
+   nir_deref_instr *parent = clone_deref_instr(b, var, parent_deref);
 
    /* Build array and struct deref instruction.
     * "deref" instr is sure to be direct (see is_direct_uniform_load()).
@@ -1209,8 +1211,8 @@ nir_clone_deref_instr(nir_builder *b, nir_variable *var,
    case nir_deref_type_ptr_as_array: {
       nir_load_const_instr *index =
          nir_instr_as_load_const(deref->arr.index.ssa->parent_instr);
-      nir_def *ssa = nir_imm_intN_t(b, index->value->i64,
-                                    parent->def.bit_size);
+      nir_ssa_def *ssa = nir_imm_intN_t(b, index->value->i64,
+                                        parent->dest.ssa.bit_size);
       return nir_build_deref_ptr_as_array(b, parent, ssa);
    }
    case nir_deref_type_struct:
@@ -1224,18 +1226,20 @@ nir_clone_deref_instr(nir_builder *b, nir_variable *var,
 static bool
 replace_varying_input_by_uniform_load(nir_shader *shader,
                                       nir_intrinsic_instr *store_intr,
-                                      nir_scalar *scalar)
+                                      nir_ssa_scalar *scalar)
 {
    nir_function_impl *impl = nir_shader_get_entrypoint(shader);
 
-   nir_builder b = nir_builder_create(impl);
+   nir_builder b;
+   nir_builder_init(&b, impl);
 
-   nir_variable *out_var = nir_intrinsic_get_var(store_intr, 0);
+   nir_variable *out_var =
+      nir_deref_instr_get_variable(nir_src_as_deref(store_intr->src[0]));
 
    nir_intrinsic_instr *load = nir_instr_as_intrinsic(scalar->def->parent_instr);
    nir_deref_instr *deref = nir_src_as_deref(load->src[0]);
    nir_variable *uni_var = nir_deref_instr_get_variable(deref);
-   uni_var = nir_clone_uniform_variable(shader, uni_var, false);
+   uni_var = get_uniform_var_in_consumer(shader, uni_var);
 
    bool progress = false;
    nir_foreach_block(block, impl) {
@@ -1259,19 +1263,19 @@ replace_varying_input_by_uniform_load(nir_shader *shader,
          b.cursor = nir_before_instr(instr);
 
          /* Clone instructions start from deref load to variable deref. */
-         nir_deref_instr *uni_deref = nir_clone_deref_instr(&b, uni_var, deref);
-         nir_def *uni_def = nir_load_deref(&b, uni_deref);
+         nir_deref_instr *uni_deref = clone_deref_instr(&b, uni_var, deref);
+         nir_ssa_def *uni_def = nir_load_deref(&b, uni_deref);
 
          /* Add a vector to scalar move if uniform is a vector. */
          if (uni_def->num_components > 1) {
-            nir_alu_src src = { 0 };
+            nir_alu_src src = {0};
             src.src = nir_src_for_ssa(uni_def);
             src.swizzle[0] = scalar->comp;
             uni_def = nir_mov_alu(&b, src, 1);
          }
 
          /* Replace load input with load uniform. */
-         nir_def_rewrite_uses(&intr->def, uni_def);
+         nir_ssa_def_rewrite_uses(&intr->dest.ssa, uni_def);
 
          progress = true;
       }
@@ -1341,7 +1345,7 @@ nir_link_varying_precision(nir_shader *producer, nir_shader *consumer)
          continue;
 
       nir_variable *consumer_var = find_consumer_variable(consumer,
-                                                          producer_var);
+            producer_var);
 
       /* Skip if the variable will be eliminated */
       if (!consumer_var)
@@ -1393,13 +1397,13 @@ nir_link_opt_varyings(nir_shader *producer, nir_shader *consumer)
       if (!can_replace_varying(out_var))
          continue;
 
-      nir_def *ssa = intr->src[1].ssa;
+      nir_ssa_def *ssa = intr->src[1].ssa;
       if (ssa->parent_instr->type == nir_instr_type_load_const) {
          progress |= replace_varying_input_by_constant_load(consumer, intr);
          continue;
       }
 
-      nir_scalar uni_scalar;
+      nir_ssa_scalar uni_scalar;
       if (is_direct_uniform_load(ssa, &uni_scalar)) {
          if (consumer->options->lower_varying_from_uniform) {
             progress |= replace_varying_input_by_uniform_load(consumer, intr,
@@ -1421,7 +1425,7 @@ nir_link_opt_varyings(nir_shader *producer, nir_shader *consumer)
       struct hash_entry *entry = _mesa_hash_table_search(varying_values, ssa);
       if (entry) {
          progress |= replace_duplicate_input(consumer,
-                                             (nir_variable *)entry->data,
+                                             (nir_variable *) entry->data,
                                              intr);
       } else {
          nir_variable *in_var = get_matching_input_var(consumer, out_var);
@@ -1474,21 +1478,12 @@ sort_varyings(nir_shader *shader, nir_variable_mode mode,
 }
 
 void
-nir_sort_variables_by_location(nir_shader *shader, nir_variable_mode mode)
-{
-   struct exec_list vars;
-
-   sort_varyings(shader, mode, &vars);
-   exec_list_append(&shader->variables, &vars);
-}
-
-void
 nir_assign_io_var_locations(nir_shader *shader, nir_variable_mode mode,
                             unsigned *size, gl_shader_stage stage)
 {
    unsigned location = 0;
-   unsigned assigned_locations[VARYING_SLOT_TESS_MAX][2];
-   uint64_t processed_locs[2] = { 0 };
+   unsigned assigned_locations[VARYING_SLOT_TESS_MAX];
+   uint64_t processed_locs[2] = {0};
 
    struct exec_list io_vars;
    sort_varyings(shader, mode, &io_vars);
@@ -1579,7 +1574,7 @@ nir_assign_io_var_locations(nir_shader *shader, nir_variable_mode mode,
       if (processed) {
          /* TODO handle overlapping per-view variables */
          assert(!var->data.per_view);
-         unsigned driver_location = assigned_locations[var->data.location][var->data.index];
+         unsigned driver_location = assigned_locations[var->data.location];
          var->data.driver_location = driver_location;
 
          /* An array may be packed such that is crosses multiple other arrays
@@ -1600,7 +1595,7 @@ nir_assign_io_var_locations(nir_shader *shader, nir_variable_mode mode,
             unsigned num_unallocated_slots = last_slot_location - location;
             unsigned first_unallocated_slot = var_size - num_unallocated_slots;
             for (unsigned i = first_unallocated_slot; i < var_size; i++) {
-               assigned_locations[var->data.location + i][var->data.index] = location;
+               assigned_locations[var->data.location + i] = location;
                location++;
             }
          }
@@ -1608,7 +1603,7 @@ nir_assign_io_var_locations(nir_shader *shader, nir_variable_mode mode,
       }
 
       for (unsigned i = 0; i < var_size; i++) {
-         assigned_locations[var->data.location + i][var->data.index] = location + i;
+         assigned_locations[var->data.location + i] = location + i;
       }
 
       var->data.driver_location = location;
@@ -1620,4 +1615,104 @@ nir_assign_io_var_locations(nir_shader *shader, nir_variable_mode mode,
 
    exec_list_append(&shader->variables, &io_vars);
    *size = location;
+}
+
+static uint64_t
+get_linked_variable_location(unsigned location, bool patch)
+{
+   if (!patch)
+      return location;
+
+   /* Reserve locations 0...3 for special patch variables
+    * like tess factors and bounding boxes, and the generic patch
+    * variables will come after them.
+    */
+   if (location >= VARYING_SLOT_PATCH0)
+      return location - VARYING_SLOT_PATCH0 + 4;
+   else if (location >= VARYING_SLOT_TESS_LEVEL_OUTER &&
+            location <= VARYING_SLOT_BOUNDING_BOX1)
+      return location - VARYING_SLOT_TESS_LEVEL_OUTER;
+   else
+      unreachable("Unsupported variable in get_linked_variable_location.");
+}
+
+static uint64_t
+get_linked_variable_io_mask(nir_variable *variable, gl_shader_stage stage)
+{
+   const struct glsl_type *type = variable->type;
+
+   if (nir_is_arrayed_io(variable, stage)) {
+      assert(glsl_type_is_array(type));
+      type = glsl_get_array_element(type);
+   }
+
+   unsigned slots = glsl_count_attribute_slots(type, false);
+   if (variable->data.compact) {
+      unsigned component_count = variable->data.location_frac + glsl_get_length(type);
+      slots = DIV_ROUND_UP(component_count, 4);
+   }
+
+   uint64_t mask = u_bit_consecutive64(0, slots);
+   return mask;
+}
+
+nir_linked_io_var_info
+nir_assign_linked_io_var_locations(nir_shader *producer, nir_shader *consumer)
+{
+   assert(producer);
+   assert(consumer);
+
+   uint64_t producer_output_mask = 0;
+   uint64_t producer_patch_output_mask = 0;
+
+   nir_foreach_shader_out_variable(variable, producer) {
+      uint64_t mask = get_linked_variable_io_mask(variable, producer->info.stage);
+      uint64_t loc = get_linked_variable_location(variable->data.location, variable->data.patch);
+
+      if (variable->data.patch)
+         producer_patch_output_mask |= mask << loc;
+      else
+         producer_output_mask |= mask << loc;
+   }
+
+   uint64_t consumer_input_mask = 0;
+   uint64_t consumer_patch_input_mask = 0;
+
+   nir_foreach_shader_in_variable(variable, consumer) {
+      uint64_t mask = get_linked_variable_io_mask(variable, consumer->info.stage);
+      uint64_t loc = get_linked_variable_location(variable->data.location, variable->data.patch);
+
+      if (variable->data.patch)
+         consumer_patch_input_mask |= mask << loc;
+      else
+         consumer_input_mask |= mask << loc;
+   }
+
+   uint64_t io_mask = producer_output_mask | consumer_input_mask;
+   uint64_t patch_io_mask = producer_patch_output_mask | consumer_patch_input_mask;
+
+   nir_foreach_shader_out_variable(variable, producer) {
+      uint64_t loc = get_linked_variable_location(variable->data.location, variable->data.patch);
+
+      if (variable->data.patch)
+         variable->data.driver_location = util_bitcount64(patch_io_mask & u_bit_consecutive64(0, loc));
+      else
+         variable->data.driver_location = util_bitcount64(io_mask & u_bit_consecutive64(0, loc));
+   }
+
+   nir_foreach_shader_in_variable(variable, consumer) {
+      uint64_t loc = get_linked_variable_location(variable->data.location, variable->data.patch);
+
+      if (variable->data.patch)
+         variable->data.driver_location = util_bitcount64(patch_io_mask & u_bit_consecutive64(0, loc));
+      else
+         variable->data.driver_location = util_bitcount64(io_mask & u_bit_consecutive64(0, loc));
+   }
+
+   nir_linked_io_var_info result = {
+      .num_linked_io_vars = util_bitcount64(io_mask),
+      .num_linked_patch_io_vars = util_bitcount64(patch_io_mask),
+   };
+
+   return result;
 }

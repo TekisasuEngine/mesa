@@ -11,18 +11,13 @@ tu_entrypoints = custom_target(
     '--include', 'adreno_common.xml.h',
     '--tmpl-prefix', 'tu', '--tmpl-param', 'chip CHIP',
     '--tmpl-variants', '<A6XX>', '<A7XX>',
-    '--beta', with_vulkan_beta.to_string(),
-    '--device-prefix', 'tu_rmv',
   ],
   depend_files : vk_entrypoints_gen_depend_files,
 )
 
 
 libtu_files = files(
-  'layers/tu_rmv_layer.cc',
   'tu_autotune.cc',
-  'tu_buffer.cc',
-  'tu_buffer_view.cc',
   'tu_clear_blit.cc',
   'tu_cmd_buffer.cc',
   'tu_cs_breadcrumbs.cc',
@@ -30,7 +25,6 @@ libtu_files = files(
   'tu_device.cc',
   'tu_descriptor_set.cc',
   'tu_dynamic_rendering.cc',
-  'tu_event.cc',
   'tu_formats.cc',
   'tu_image.cc',
   'tu_knl.cc',
@@ -38,21 +32,12 @@ libtu_files = files(
   'tu_nir_lower_multiview.cc',
   'tu_pass.cc',
   'tu_pipeline.cc',
-  'tu_sampler.cc',
-  'tu_query_pool.cc',
-  'tu_rmv.cc',
+  'tu_query.cc',
   'tu_shader.cc',
   'tu_suballoc.cc',
   'tu_util.cc',
 )
 
-libtu_includes = [
-    inc_include,
-    inc_src,
-    inc_freedreno,
-]
-
-tu_link_with = []
 tu_deps = []
 tu_flags = []
 
@@ -92,18 +77,7 @@ endif
 
 if freedreno_kmds.contains('msm')
   tu_flags += '-DTU_HAS_MSM'
-  libtu_files += files('tu_knl_drm_msm.cc', 'tu_knl_drm.cc')
-  tu_deps += dep_libdrm
-endif
-
-if freedreno_kmds.contains('virtio')
-  tu_flags += '-DTU_HAS_VIRTIO'
-  libtu_files += files('tu_knl_drm_virtio.cc', 'tu_knl_drm.cc')
-  libtu_includes += [
-    inc_virtio_gpu,
-    inc_virtio_vdrm,
-  ]
-  tu_link_with += libvdrm
+  libtu_files += files('tu_knl_drm_msm.cc')
   tu_deps += dep_libdrm
 endif
 
@@ -122,7 +96,7 @@ tu_tracepoints = custom_target(
 )
 
 if with_perfetto
-  libtu_files += ['tu_perfetto.cc']
+  libtu_files += ['tu_perfetto.cc', 'tu_perfetto_util.cc']
   tu_deps += dep_perfetto
 endif
 
@@ -143,7 +117,6 @@ tu_cpp_args += cpp.get_supported_arguments([
   '-Wno-unused-function',
   '-Wno-writable-strings',
   '-Wno-write-strings',
-  '-Wno-vla-cxx-extension',
 ])
 
 # HACK compiler.get_supported_arguments()/has_argument() do not seem
@@ -160,12 +133,20 @@ endif
 libvulkan_freedreno = shared_library(
   'vulkan_freedreno',
   [libtu_files, tu_entrypoints, tu_tracepoints, freedreno_xml_header_files, sha1_h, u_format_pack_h],
-  include_directories : libtu_includes,
+  include_directories : [
+    inc_include,
+    inc_src,
+    inc_mapi,
+    inc_mesa,
+    inc_gallium,
+    inc_gallium_aux,
+    inc_compiler,
+    inc_freedreno,
+  ],
   link_with : [
     libfreedreno_ir3,
     libfreedreno_layout,
     libfreedreno_perfcntrs,
-    tu_link_with,
   ],
   dependencies : [
     idep_libfreedreno_common,
@@ -215,7 +196,6 @@ freedreno_icd = custom_target(
   ],
   build_by_default : true,
   install_dir : with_vulkan_icd_dir,
-  install_tag : 'runtime',
   install : true,
 )
 
@@ -233,6 +213,4 @@ _dev_icd = custom_target(
   build_by_default : true,
 )
 
-devenv.append('VK_DRIVER_FILES', _dev_icd.full_path())
-# Deprecated: replaced by VK_DRIVER_FILES above
 devenv.append('VK_ICD_FILENAMES', _dev_icd.full_path())

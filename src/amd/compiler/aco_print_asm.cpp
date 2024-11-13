@@ -1,14 +1,32 @@
 /*
  * Copyright © 2018 Valve Corporation
  *
- * SPDX-License-Identifier: MIT
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ *
  */
 
 #include "aco_ir.h"
 
 #include "util/u_debug.h"
 
-#if AMD_LLVM_AVAILABLE
+#ifdef LLVM_AVAILABLE
 #if defined(_MSC_VER) && defined(restrict)
 #undef restrict
 #endif
@@ -130,7 +148,9 @@ to_clrx_device_name(amd_gfx_level gfx_level, radeon_family family)
       case CHIP_NAVI12: return "gfx1011";
       default: return nullptr;
       }
-   default: return nullptr;
+   case GFX10_3:
+   case GFX11: return nullptr;
+   default: unreachable("Invalid chip class!"); return nullptr;
    }
 }
 
@@ -161,7 +181,6 @@ print_asm_clrx(Program* program, std::vector<uint32_t>& binary, unsigned exec_si
 #else
    char path[] = "/tmp/fileXXXXXX";
    char line[2048], command[128];
-   bool ret = false;
    FILE* p;
    int fd;
 
@@ -173,10 +192,8 @@ print_asm_clrx(Program* program, std::vector<uint32_t>& binary, unsigned exec_si
       return true;
 
    for (unsigned i = 0; i < exec_size; i++) {
-      if (write(fd, &binary[i], 4) == -1) {
-         ret = true;
+      if (write(fd, &binary[i], 4) == -1)
          goto fail;
-      }
    }
 
    sprintf(command, "clrxdisasm --gpuType=%s -r %s", gpu_type, path);
@@ -186,7 +203,6 @@ print_asm_clrx(Program* program, std::vector<uint32_t>& binary, unsigned exec_si
       if (!fgets(line, sizeof(line), p)) {
          fprintf(output, "clrxdisasm not found\n");
          pclose(p);
-         ret = true;
          goto fail;
       }
 
@@ -243,14 +259,16 @@ print_asm_clrx(Program* program, std::vector<uint32_t>& binary, unsigned exec_si
       print_constant_data(output, program);
    }
 
+   return false;
+
 fail:
    close(fd);
    unlink(path);
-   return ret;
+   return true;
 #endif
 }
 
-#if AMD_LLVM_AVAILABLE
+#ifdef LLVM_AVAILABLE
 std::pair<bool, size_t>
 disasm_instr(amd_gfx_level gfx_level, LLVMDisasmContextRef disasm, uint32_t* binary,
              unsigned exec_size, size_t pos, char* outline, unsigned outline_size)
@@ -292,6 +310,32 @@ disasm_instr(amd_gfx_level gfx_level, LLVMDisasmContextRef disasm, uint32_t* bin
       size = l / 4;
    }
 
+#if LLVM_VERSION_MAJOR <= 14
+   /* See: https://github.com/GPUOpen-Tools/radeon_gpu_profiler/issues/65 and
+    * https://github.com/llvm/llvm-project/issues/38652
+    */
+   if (invalid) {
+      /* do nothing */
+   } else if (gfx_level == GFX9 && (binary[pos] & 0xfc024000) == 0xc0024000) {
+      /* SMEM with IMM=1 and SOE=1: LLVM ignores SOFFSET */
+      size_t len = strlen(outline);
+
+      char imm[16] = {0};
+      while (outline[--len] != ' ') ;
+      strncpy(imm, outline + len + 1, sizeof(imm) - 1);
+
+      snprintf(outline + len, outline_size - len, " s%u offset:%s", binary[pos + 1] >> 25, imm);
+   } else if (gfx_level >= GFX10 && (binary[pos] & 0xfc000000) == 0xf4000000 &&
+              (binary[pos + 1] & 0xfe000000) != 0xfa000000) {
+      /* SMEM non-NULL SOFFSET: LLVM ignores OFFSET */
+      uint32_t offset = binary[pos + 1] & 0x1fffff;
+      if (offset) {
+         size_t len = strlen(outline);
+         snprintf(outline + len, outline_size - len, " offset:0x%x", offset);
+      }
+   }
+#endif
+
    return std::make_pair(invalid, size);
 }
 
@@ -329,7 +373,7 @@ print_asm_llvm(Program* program, std::vector<uint32_t>& binary, unsigned exec_si
    unsigned prev_size = 0;
    unsigned prev_pos = 0;
    unsigned repeat_count = 0;
-   while (pos <= exec_size) {
+   while (pos < exec_size) {
       bool new_block =
          next_block < program->blocks.size() && pos == program->blocks[next_block].offset;
       if (pos + prev_size <= exec_size && prev_pos != pos && !new_block &&
@@ -344,10 +388,6 @@ print_asm_llvm(Program* program, std::vector<uint32_t>& binary, unsigned exec_si
       }
 
       print_block_markers(output, program, referenced_blocks, &next_block, pos);
-
-      /* For empty last block, only print block marker. */
-      if (pos == exec_size)
-         break;
 
       char outline[1024];
       std::pair<bool, size_t> res = disasm_instr(program->gfx_level, disasm, binary.data(),
@@ -368,14 +408,14 @@ print_asm_llvm(Program* program, std::vector<uint32_t>& binary, unsigned exec_si
 
    return invalid;
 }
-#endif /* AMD_LLVM_AVAILABLE */
+#endif /* LLVM_AVAILABLE */
 
 } /* end namespace */
 
 bool
 check_print_asm_support(Program* program)
 {
-#if AMD_LLVM_AVAILABLE
+#ifdef LLVM_AVAILABLE
    if (program->gfx_level >= GFX8) {
       /* LLVM disassembler only supports GFX8+ */
       const char* name = ac_get_llvm_processor_name(program->family);
@@ -396,7 +436,7 @@ check_print_asm_support(Program* program)
 #ifndef _WIN32
    /* Check if CLRX disassembler binary is available and can disassemble the program */
    return to_clrx_device_name(program->gfx_level, program->family) &&
-          system("clrxdisasm --version > /dev/null 2>&1") == 0;
+          system("clrxdisasm --version") == 0;
 #else
    return false;
 #endif
@@ -406,7 +446,7 @@ check_print_asm_support(Program* program)
 bool
 print_asm(Program* program, std::vector<uint32_t>& binary, unsigned exec_size, FILE* output)
 {
-#if AMD_LLVM_AVAILABLE
+#ifdef LLVM_AVAILABLE
    if (program->gfx_level >= GFX8) {
       return print_asm_llvm(program, binary, exec_size, output);
    }

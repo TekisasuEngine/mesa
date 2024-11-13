@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#pragma once
+#ifndef __AGX_NIR_LOWER_VBO_H
+#define __AGX_NIR_LOWER_VBO_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -21,44 +22,25 @@ extern "C" {
  * be small so it can be embedded into a shader key.
  */
 struct agx_attribute {
-   /* If instanced, Zero means all get the same value (Vulkan semantics). */
    uint32_t divisor;
-   uint32_t stride;
    uint16_t src_offset;
+   uint8_t buf;
 
    /* pipe_format, all vertex formats should be <= 255 */
    uint8_t format;
-
-   unsigned buf   : 7;
-   bool instanced : 1;
 };
 
-enum agx_robustness_level {
-   /* No robustness */
-   AGX_ROBUSTNESS_DISABLED,
-
-   /* Invalid load/store must not fault, but undefined value/effect */
-   AGX_ROBUSTNESS_GLES,
-
-   /* Invalid load/store access something from the array (or 0) */
-   AGX_ROBUSTNESS_GL,
-
-   /* Invalid loads return 0 and invalid stores are dropped */
-   AGX_ROBUSTNESS_D3D,
+struct agx_vbufs {
+   unsigned count;
+   uint32_t strides[AGX_MAX_VBUFS];
+   struct agx_attribute attributes[AGX_MAX_ATTRIBS];
 };
 
-struct agx_robustness {
-   enum agx_robustness_level level;
-
-   /* Whether hardware "soft fault" is enabled. */
-   bool soft_fault;
-};
-
-bool agx_nir_lower_vbo(nir_shader *shader, struct agx_attribute *attribs,
-                       struct agx_robustness rs);
-
+bool agx_nir_lower_vbo(nir_shader *shader, struct agx_vbufs *vbufs);
 bool agx_vbo_supports_format(enum pipe_format format);
 
 #ifdef __cplusplus
 } /* extern C */
+#endif
+
 #endif

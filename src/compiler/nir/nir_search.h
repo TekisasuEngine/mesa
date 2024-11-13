@@ -24,15 +24,15 @@
 #ifndef _NIR_SEARCH_
 #define _NIR_SEARCH_
 
-#include "util/u_dynarray.h"
 #include "nir.h"
 #include "nir_worklist.h"
+#include "util/u_dynarray.h"
 
 #define NIR_SEARCH_MAX_VARIABLES 16
 
 struct nir_builder;
 
-typedef enum ENUM_PACKED {
+typedef enum PACKED {
    nir_search_value_expression,
    nir_search_value_variable,
    nir_search_value_constant,
@@ -139,15 +139,6 @@ typedef struct {
    /** Don't make the replacement exact if the search expression is exact. */
    bool ignore_exact : 1;
 
-   /** Replacement does not preserve signed of zero. */
-   bool nsz : 1;
-
-   /** Replacement does not preserve NaN. */
-   bool nnan : 1;
-
-   /** Replacement does not preserve infinities. */
-   bool ninf : 1;
-
    /* One of nir_op or nir_search_op */
    uint16_t opcode : 13;
 
@@ -182,7 +173,7 @@ struct per_op_table {
 };
 
 struct transform {
-   uint16_t search;  /* Index in table->values[] for the search expression. */
+   uint16_t search; /* Index in table->values[] for the search expression. */
    uint16_t replace; /* Index in table->values[] for the replace value. */
    unsigned condition_offset;
 };

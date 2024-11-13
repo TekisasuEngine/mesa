@@ -32,12 +32,13 @@
 #include <errno.h>
 
 #include "c99_alloca.h"
+#include "os/os_process.h"
 #include "util/u_atomic.h"
 #include "util/u_debug.h"
 #include "util/u_string.h"
 
 #include "util/detect.h"
-#if DETECT_OS_POSIX
+#if DETECT_OS_UNIX
 #include <unistd.h>
 #include <sys/stat.h>
 #elif DETECT_OS_WINDOWS

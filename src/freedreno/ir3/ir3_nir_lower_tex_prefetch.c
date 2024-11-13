@@ -1,6 +1,24 @@
 /*
  * Copyright © 2019 Igalia S.L.
- * SPDX-License-Identifier: MIT
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
  */
 
 #include "ir3_nir.h"
@@ -11,7 +29,7 @@
  */
 
 static int
-coord_offset(nir_def *ssa)
+coord_offset(nir_ssa_def *ssa)
 {
    nir_instr *parent_instr = ssa->parent_instr;
 
@@ -27,6 +45,9 @@ coord_offset(nir_def *ssa)
       if (alu->op != nir_op_vec2)
          return -1;
 
+      if (!alu->src[0].src.is_ssa)
+         return -1;
+
       int base_src_offset = coord_offset(alu->src[0].src.ssa);
       if (base_src_offset < 0)
          return -1;
@@ -35,6 +56,9 @@ coord_offset(nir_def *ssa)
 
       /* NOTE it might be possible to support more than 2D? */
       for (int i = 1; i < 2; i++) {
+         if (!alu->src[i].src.is_ssa)
+            return -1;
+
          int nth_src_offset = coord_offset(alu->src[i].src.ssa);
          if (nth_src_offset < 0)
             return -1;
@@ -53,6 +77,12 @@ coord_offset(nir_def *ssa)
    nir_intrinsic_instr *input = nir_instr_as_intrinsic(parent_instr);
 
    if (input->intrinsic != nir_intrinsic_load_interpolated_input)
+      return -1;
+
+   /* limit to load_barycentric_pixel, other interpolation modes don't seem
+    * to be supported:
+    */
+   if (!input->src[0].is_ssa)
       return -1;
 
    /* Happens with lowered load_barycentric_at_offset */
@@ -83,7 +113,7 @@ coord_offset(nir_def *ssa)
 }
 
 int
-ir3_nir_coord_offset(nir_def *ssa)
+ir3_nir_coord_offset(nir_ssa_def *ssa)
 {
 
    assert(ssa->num_components == 2);
@@ -167,6 +197,7 @@ lower_tex_prefetch_block(nir_block *block)
       int idx = nir_tex_instr_src_index(tex, nir_tex_src_coord);
       /* First source should be the sampling coordinate. */
       nir_tex_src *coord = &tex->src[idx];
+      assert(coord->src.is_ssa);
 
       if (ir3_nir_coord_offset(coord->src.ssa) >= 0) {
          tex->op = nir_texop_tex_prefetch;
@@ -205,7 +236,7 @@ lower_tex_prefetch_func(nir_function_impl *impl)
 
    if (progress) {
       nir_metadata_preserve(impl,
-                            nir_metadata_control_flow);
+                            nir_metadata_block_index | nir_metadata_dominance);
    }
 
    return progress;

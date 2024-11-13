@@ -43,7 +43,6 @@ renderonly_scanout_destroy(struct renderonly_scanout *scanout,
 {
    struct drm_mode_destroy_dumb destroy_dumb = {0};
 
-   assert(p_atomic_read(&scanout->refcnt) > 0);
    if (p_atomic_dec_return(&scanout->refcnt))
       return;
 
@@ -134,7 +133,7 @@ renderonly_create_gpu_import_for_resource(struct pipe_resource *rsc,
 {
    struct pipe_screen *screen = rsc->screen;
    struct renderonly_scanout *scanout = NULL;
-   bool status;
+   boolean status;
    uint32_t scanout_handle;
    int fd, err;
    struct winsys_handle handle = {

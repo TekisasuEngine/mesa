@@ -13,16 +13,13 @@
 #include "tu_common.h"
 
 struct tu_u_trace_syncobj;
-struct vdrm_bo;
 
-enum tu_bo_alloc_flags {
+enum tu_bo_alloc_flags
+{
    TU_BO_ALLOC_NO_FLAGS = 0,
    TU_BO_ALLOC_ALLOW_DUMP = 1 << 0,
    TU_BO_ALLOC_GPU_READ_ONLY = 1 << 1,
    TU_BO_ALLOC_REPLAYABLE = 1 << 2,
-   TU_BO_ALLOC_INTERNAL_RESOURCE = 1 << 3,
-   TU_BO_ALLOC_DMABUF = 1 << 4,
-   TU_BO_ALLOC_SHAREABLE = 1 << 5,
 };
 
 /* Define tu_timeline_sync type based on drm syncobj for a point type
@@ -41,16 +38,8 @@ enum tu_timeline_sync_state {
    TU_TIMELINE_SYNC_STATE_SIGNALED,
 };
 
-enum tu_mem_sync_op {
-   TU_MEM_SYNC_CACHE_TO_GPU,
-   TU_MEM_SYNC_CACHE_FROM_GPU,
-};
-
 struct tu_bo {
    uint32_t gem_handle;
-#ifdef TU_HAS_VIRTIO
-   uint32_t res_id;
-#endif
    uint64_t size;
    uint64_t iova;
    void *map;
@@ -59,64 +48,32 @@ struct tu_bo {
 
    uint32_t bo_list_idx;
 
-#ifdef TU_HAS_KGSL
-   /* We have to store fd returned by ion_fd_data
-    * in order to be able to mmap this buffer and to
-    * export file descriptor.
-    */
-   int shared_fd;
-#endif
-
    bool implicit_sync : 1;
-   bool never_unmap : 1;
-   bool cached_non_coherent : 1;
-
-   /* Pointer to the vk_object_base associated with the BO
-    * for the purposes of VK_EXT_device_address_binding_report
-    */
-   struct vk_object_base *base;
 };
 
 struct tu_knl {
    const char *name;
 
-   VkResult (*device_init)(struct tu_device *dev);
-   void (*device_finish)(struct tu_device *dev);
    int (*device_get_gpu_timestamp)(struct tu_device *dev, uint64_t *ts);
    int (*device_get_suspend_count)(struct tu_device *dev, uint64_t *suspend_count);
    VkResult (*device_check_status)(struct tu_device *dev);
-   int (*submitqueue_new)(struct tu_device *dev, int priority, uint32_t *queue_id);
-   void (*submitqueue_close)(struct tu_device *dev, uint32_t queue_id);
-   VkResult (*bo_init)(struct tu_device *dev, struct vk_object_base *base,
-                       struct tu_bo **out_bo, uint64_t size, uint64_t client_iova,
-                       VkMemoryPropertyFlags mem_property,
+   int (*submitqueue_new)(const struct tu_device *dev, int priority, uint32_t *queue_id);
+   void (*submitqueue_close)(const struct tu_device *dev, uint32_t queue_id);
+   VkResult (*bo_init)(struct tu_device *dev, struct tu_bo **out_bo, uint64_t size,
+                       uint64_t client_iova, VkMemoryPropertyFlags mem_property,
                        enum tu_bo_alloc_flags flags, const char *name);
    VkResult (*bo_init_dmabuf)(struct tu_device *dev, struct tu_bo **out_bo,
                               uint64_t size, int prime_fd);
    int (*bo_export_dmabuf)(struct tu_device *dev, struct tu_bo *bo);
-   VkResult (*bo_map)(struct tu_device *dev, struct tu_bo *bo, void *placed_addr);
+   VkResult (*bo_map)(struct tu_device *dev, struct tu_bo *bo);
    void (*bo_allow_dump)(struct tu_device *dev, struct tu_bo *bo);
    void (*bo_finish)(struct tu_device *dev, struct tu_bo *bo);
-   void (*bo_set_metadata)(struct tu_device *dev, struct tu_bo *bo,
-                           void *metadata, uint32_t metadata_size);
-   int (*bo_get_metadata)(struct tu_device *dev, struct tu_bo *bo,
-                          void *metadata, uint32_t metadata_size);
    VkResult (*device_wait_u_trace)(struct tu_device *dev,
                                    struct tu_u_trace_syncobj *syncobj);
    VkResult (*queue_submit)(struct tu_queue *queue,
                             struct vk_queue_submit *submit);
 
    const struct vk_device_entrypoint_table *device_entrypoints;
-};
-
-struct tu_zombie_vma {
-   int fence;
-   uint32_t gem_handle;
-#ifdef TU_HAS_VIRTIO
-   uint32_t res_id;
-#endif
-   uint64_t iova;
-   uint64_t size;
 };
 
 struct tu_timeline_sync {
@@ -128,7 +85,6 @@ struct tu_timeline_sync {
 
 VkResult
 tu_bo_init_new_explicit_iova(struct tu_device *dev,
-                             struct vk_object_base *base,
                              struct tu_bo **out_bo,
                              uint64_t size,
                              uint64_t client_iova,
@@ -137,14 +93,11 @@ tu_bo_init_new_explicit_iova(struct tu_device *dev,
                              const char *name);
 
 static inline VkResult
-tu_bo_init_new(struct tu_device *dev, struct vk_object_base *base,
-               struct tu_bo **out_bo, uint64_t size,
+tu_bo_init_new(struct tu_device *dev, struct tu_bo **out_bo, uint64_t size,
                enum tu_bo_alloc_flags flags, const char *name)
 {
-   // TODO don't mark everything with HOST_VISIBLE !!! Anything that
-   // never gets CPU access should not have this bit set
    return tu_bo_init_new_explicit_iova(
-      dev, base, out_bo, size, 0,
+      dev, out_bo, size, 0,
       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -164,26 +117,9 @@ void
 tu_bo_finish(struct tu_device *dev, struct tu_bo *bo);
 
 VkResult
-tu_bo_map(struct tu_device *dev, struct tu_bo *bo, void *placed_addr);
-
-VkResult
-tu_bo_unmap(struct tu_device *dev, struct tu_bo *bo, bool reserve);
-
-void
-tu_bo_sync_cache(struct tu_device *dev,
-                 struct tu_bo *bo,
-                 VkDeviceSize offset,
-                 VkDeviceSize size,
-                 enum tu_mem_sync_op op);
-
-uint32_t tu_get_l1_dcache_size();
+tu_bo_map(struct tu_device *dev, struct tu_bo *bo);
 
 void tu_bo_allow_dump(struct tu_device *dev, struct tu_bo *bo);
-
-void tu_bo_set_metadata(struct tu_device *dev, struct tu_bo *bo,
-                        void *metadata, uint32_t metadata_size);
-int tu_bo_get_metadata(struct tu_device *dev, struct tu_bo *bo,
-                       void *metadata, uint32_t metadata_size);
 
 static inline struct tu_bo *
 tu_bo_get_ref(struct tu_bo *bo)
@@ -198,9 +134,6 @@ struct _drmVersion;
 VkResult tu_knl_drm_msm_load(struct tu_instance *instance,
                              int fd, struct _drmVersion *version,
                              struct tu_physical_device **out);
-VkResult tu_knl_drm_virtio_load(struct tu_instance *instance,
-                                int fd, struct _drmVersion *version,
-                                struct tu_physical_device **out);
 
 VkResult
 tu_enumerate_devices(struct vk_instance *vk_instance);
@@ -208,12 +141,6 @@ VkResult
 tu_physical_device_try_create(struct vk_instance *vk_instance,
                               struct _drmDevice *drm_device,
                               struct vk_physical_device **out);
-
-VkResult
-tu_drm_device_init(struct tu_device *dev);
-
-void
-tu_drm_device_finish(struct tu_device *dev);
 
 int
 tu_device_get_gpu_timestamp(struct tu_device *dev,
@@ -230,12 +157,12 @@ VkResult
 tu_device_check_status(struct vk_device *vk_device);
 
 int
-tu_drm_submitqueue_new(struct tu_device *dev,
+tu_drm_submitqueue_new(const struct tu_device *dev,
                        int priority,
                        uint32_t *queue_id);
 
 void
-tu_drm_submitqueue_close(struct tu_device *dev, uint32_t queue_id);
+tu_drm_submitqueue_close(const struct tu_device *dev, uint32_t queue_id);
 
 VkResult
 tu_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit);

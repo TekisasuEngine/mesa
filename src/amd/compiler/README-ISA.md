@@ -189,27 +189,6 @@ On GFX9, the A16 field enables both 16 bit addresses and derivatives.
 Since GFX10+ these are fully independent of each other, A16 controls 16 bit addresses
 and G16 opcodes 16 bit derivatives. A16 without G16 uses 32 bit derivatives.
 
-## POPS collision wave ID argument (GFX9-10.3)
-
-The 2020 RDNA and RDNA 2 ISA references contain incorrect offsets and widths of
-the fields of the "POPS collision wave ID" SGPR argument.
-
-According to the code generated for Rasterizer Ordered View usage in Direct3D,
-the correct layout is:
-
-* [31]: Whether overlap has occurred.
-* [29:28] (GFX10+) / [28] (GFX9): ID of the packer the wave should be associated
-  with.
-* [25:16]: Newest overlapped wave ID.
-* [9:0]: Current wave ID.
-
-## RDNA3 `v_pk_fmac_f16_dpp`
-
-"Table 30. Which instructions support DPP" in the RDNA3 ISA documentation has no exception for
-VOP2 `v_pk_fmac_f16`. But like all other packed math opcodes, DPP does not function in practice.
-RDNA1 and RDNA2 support `v_pk_fmac_f16_dpp`.
-
-
 # Hardware Bugs
 
 ## SMEM corrupts VCCZ on SI/CI
@@ -275,8 +254,8 @@ is located at this offset.
 
 ### InstFwdPrefetchBug
 
-According to LLVM, the `s_inst_prefetch` instruction can cause a hang on GFX10.
-Seems to be resolved on GFX10.3+. There are no further details.
+According to LLVM, the `s_inst_prefetch` instruction can cause a hang.
+There are no further details.
 
 ### LdsMisalignedBug
 
@@ -353,7 +332,7 @@ Waiting for the VMEM/DS instruction to finish, a VALU or export instruction, or
 ### VALUTransUseHazard
 
 Triggered by:
-A VALU instruction reading a VGPR written by a transcendental VALU instruction without 6+ VALU or 2+
+A VALU instrction reading a VGPR written by a transcendental VALU instruction without 6+ VALU or 2+
 transcendental instructions in-between.
 
 Mitigated by:
@@ -372,8 +351,7 @@ A va_vdst=0 wait: `s_waitcnt_deptr 0x0fff`
 ### VALUMaskWriteHazard
 
 Triggered by:
-SALU writing then SALU or VALU reading a SGPR that was previously used as a lane mask for a VALU.
+SALU writing then reading a SGPR that was previously used as a lane mask for a VALU.
 
 Mitigated by:
-A VALU instruction reading a non-exec SGPR before the SALU write, or a sa_sdst=0 wait after the
-SALU write: `s_waitcnt_depctr 0xfffe`
+A VALU instruction reading a SGPR or with literal, or a sa_sdst=0 wait: `s_waitcnt_depctr 0xfffe`

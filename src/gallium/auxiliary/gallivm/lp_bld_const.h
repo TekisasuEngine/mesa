@@ -37,7 +37,7 @@
 #define LP_BLD_CONST_H
 
 
-#include "util/compiler.h"
+#include "pipe/p_compiler.h"
 #include "gallivm/lp_bld.h"
 #include "gallivm/lp_bld_init.h"
 

@@ -28,7 +28,7 @@
 #include "util/u_bitcast.h"
 #include <math.h>
 
-static bool
+static boolean
 TAG(do_cliptest)(struct pt_post_vs *pvs,
                  struct draw_vertex_info *info,
                  const struct draw_prim_info *prim_info)
@@ -173,7 +173,7 @@ TAG(do_cliptest)(struct pt_post_vs *pvs,
          position[2] = position[2] * w * scale[2] + trans[2];
          position[3] = w;
       }
-#if MESA_DEBUG
+#ifdef DEBUG
       /* For debug builds, set the clipped vertex's window coordinate
        * to NaN to help catch potential errors later.
        */

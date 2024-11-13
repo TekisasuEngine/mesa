@@ -74,6 +74,8 @@ instrs_equal(const void *_i1, const void *_i2)
 
    if (i1->imm != i2->imm)
       return false;
+   if (i1->perspective != i2->perspective)
+      return false;
    if (i1->invert_cond != i2->invert_cond)
       return false;
    if (i1->dim != i2->dim)
@@ -104,10 +106,9 @@ void
 agx_opt_cse(agx_context *ctx)
 {
    struct set *instr_set = _mesa_set_create(NULL, hash_instr, instrs_equal);
-   agx_index *replacement = malloc(sizeof(agx_index) * ctx->alloc);
 
    agx_foreach_block(ctx, block) {
-      memset(replacement, 0, sizeof(agx_index) * ctx->alloc);
+      agx_index *replacement = calloc(sizeof(agx_index), ctx->alloc);
       _mesa_set_clear(instr_set, NULL);
 
       agx_foreach_instr_in_block(block, instr) {
@@ -132,8 +133,9 @@ agx_opt_cse(agx_context *ctx)
             }
          }
       }
+
+      free(replacement);
    }
 
-   free(replacement);
    _mesa_set_destroy(instr_set, NULL);
 }

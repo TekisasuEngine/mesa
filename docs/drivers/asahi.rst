@@ -32,73 +32,48 @@ below.
 Vertex shader
 `````````````
 
-A vertex shader (running on the :term:`Unified Shader Cores`) outputs varyings with the
+A vertex shader (running on the Unified Shader Cores) outputs varyings with the
 ``st_var`` instruction. ``st_var`` takes a *vertex output index* and a 32-bit
 value. The maximum number of *vertex outputs* is specified as the "output count"
 of the shader in the "Bind Vertex Pipeline" packet. The value may be interpreted
 consist of a single 32-bit value or an aligned 16-bit register pair, depending
 on whether interpolation should happen at 32-bit or 16-bit. Vertex outputs are
 indexed starting from 0, with the *vertex position* always coming first, the
-32-bit user varyings coming next with perspective, flat, and linear interpolated
-varyings grouped in that order, then 16-bit user varyings with the same groupings,
-and finally *point size* and *clip distances* at the end if present. Note that
-*clip distances* are not accessible from the fragment shader; if the fragment
-shader needs to read the interpolated clip distance, the vertex shader must
-*also* write the clip distance values to a user varying for the fragment shader
-to interpolate. Also note there is no clip plane enable mask anywhere; that must
-lowered for APIs that require this (OpenGL but not Vulkan).
+32-bit user varyings coming next, then 16-bit user varyings, and finally *point
+size* and *clip distances* at the end if present. Note that *clip distances* are
+not accessible from the fragment shader; if the fragment shader needs to read
+the interpolated clip distance, the vertex shader must *also* write the clip
+distance values to a user varying for the fragment shader to interpolate. Also
+note there is no clip plane enable mask anywhere; that must lowered for APIs
+that require this (OpenGL but not Vulkan).
 
 .. list-table:: Ordering of vertex outputs with all outputs used
    :widths: 25 75
    :header-rows: 1
 
-   * - Size (words)
+   * - Index
      - Value
-   * - 4
+   * - 0
      - Vertex position
-   * - 1
-     - 32-bit smooth varying 0
+   * - 4
+     - 32-bit varying 0
    * -
      - ...
-   * - 1
-     - 32-bit smooth varying m
-   * - 1
-     - 32-bit flat varying 0
+   * - 4 + m
+     - 32-bit varying m
+   * - 4 + m + 1
+     - Packed pair of 16-bit varyings 0
    * -
      - ...
-   * - 1
-     - 32-bit flat varying n
-   * - 1
-     - 32-bit linear varying 0
-   * -
-     - ...
-   * - 1
-     - 32-bit linear varying o
-   * - 1
-     - Packed pair of 16-bit smooth varyings 0
-   * -
-     - ...
-   * - 1
-     - Packed pair of 16-bit smooth varyings p
-   * - 1
-     - Packed pair of 16-bit flat varyings 0
-   * -
-     - ...
-   * - 1
-     - Packed pair of 16-bit flat varyings q
-   * - 1
-     - Packed pair of 16-bit linear varyings 0
-   * -
-     - ...
-   * - 1
-     - Packed pair of 16-bit linear varyings r
-   * - 1
+   * - 4 + m + 1 + n
+     - Packed pair of 16-bit varyings n
+   * - 4 + m + 1 + n + 1
      - Point size
-   * - 1
+   * - 4 + m + 1 + n + 2 + 0
      - Clip distance for plane 0
    * -
      - ...
-   * - 1
+   * - 4 + m + 1 + n + 2 + 15
      - Clip distance for plane 15
 
 Remapping
@@ -205,7 +180,8 @@ Strided linear images have numerous limitations:
 - Strides must be a multiple of 16 bytes.
 - Strides must be nonzero. For 1D images where the stride is logically
   irrelevant, ail will internally select the minimal stride.
-- Only 1D, 2D, and 2D Array images may be linear. In particular, no 3D or cubemaps.
+- Only 1D and 2D images may be linear. In particular, no 3D or cubemaps.
+- Array texture may not be linear. No 2D arrays or cubemap arrays.
 - 2D images must not be mipmapped.
 - Block-compressed formats and multisampled images are unsupported. Elements of
   a strided linear image are simply pixels.
@@ -306,62 +282,16 @@ useful for exercising the compiler. To build, use options:
 
 Then run an OpenGL workload with environment variable:
 
-.. code-block:: sh
+.. code-block:: console
 
    LD_PRELOAD=~/mesa/build/src/asahi/drm-shim/libasahi_noop_drm_shim.so
 
 For example to compile a shader with shaderdb and print some statistics along
 with the IR:
 
-.. code-block:: sh
+.. code-block:: console
 
-   ~/shader-db$ AGX_MESA_DEBUG=shaders,shaderdb ASAHI_MESA_DEBUG=precompile LD_PRELOAD=~/mesa/build/src/asahi/drm-shim/libasahi_noop_drm_shim.so ./run shaders/glmark/1-12.shader_test
+   ~/shader-db$ AGX_MESA_DEBUG=shaders,shaderdb ASAHI_MESA_DEBUG=precompile LIBGL_DRIVERS_PATH=~/lib/dri/ LD_PRELOAD=~/mesa/build/src/asahi/drm-shim/libasahi_noop_drm_shim.so ./run shaders/glmark/1-12.shader_test
 
 The drm-shim implementation for Asahi is located in ``src/asahi/drm-shim``. The
 drm-shim implementation there should be updated as new UABI is added.
-
-Hardware glossary
------------------
-
-AGX is a tiled renderer descended from the PowerVR architecture. Some hardware
-concepts used in PowerVR GPUs appear in AGX.
-
-.. glossary:: :sorted:
-
-   VDM
-   Vertex Data Master
-      Dispatches vertex shaders.
-
-   PDM
-   Pixel Data Master
-      Dispatches pixel shaders.
-
-   CDM
-   Compute Data Master
-      Dispatches compute kernels.
-
-   USC
-   Unified Shader Cores
-      A unified shader core is a small CPU that runs shader code. The core is
-      unified because a single ISA is used for vertex, pixel and compute
-      shaders. This differs from older GPUs where the vertex, fragment and
-      compute have separate ISAs for shader stages.
-
-   PPP
-   Primitive Processing Pipeline
-      The Primitive Processing Pipeline is a hardware unit that does primitive
-      assembly. The PPP is between the :term:`VDM` and :term:`ISP`.
-
-   ISP
-   Image Synthesis Processor
-      The Image Synthesis Processor is responsible for the rasterization stage
-      of the rendering pipeline.
-
-   PBE
-   Pixel BackEnd
-      Hardware unit which writes to color attachments and images. Also the
-      name for a descriptor passed to :term:`PBE` instructions.
-
-   UVS
-   Unified Vertex Store
-      Hardware unit which buffers the outputs of the vertex shader (varyings).

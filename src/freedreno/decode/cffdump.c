@@ -1,6 +1,24 @@
 /*
- * Copyright © 2012 Rob Clark <robdclark@gmail.com>
- * SPDX-License-Identifier: MIT
+ * Copyright (c) 2012 Rob Clark <robdclark@gmail.com>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 
 #include <assert.h>
@@ -17,7 +35,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <inttypes.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -32,7 +49,9 @@
 #include "script.h"
 #include "rdutil.h"
 
-static struct cffdec_options options;
+static struct cffdec_options options = {
+   .gpu_id = 220,
+};
 
 static bool needs_wfi = false;
 static bool is_blob = false;
@@ -48,7 +67,7 @@ print_usage(const char *name)
 {
    /* clang-format off */
    fprintf(stderr, "Usage:\n\n"
-           "\t%s [OPTIONS]... FILE...\n\n"
+           "\t%s [OPTSIONS]... FILE...\n\n"
            "Options:\n"
            "\t-v, --verbose    - more verbose disassembly\n"
            "\t--dump-shaders   - dump each shader to a raw file\n"
@@ -67,7 +86,6 @@ print_usage(const char *name)
            "\t-D, --draw=N     - decode only draw N\n"
            "\t-e, --exe=NAME   - only decode cmdstream from named process\n"
            "\t--textures       - dump texture contents (if possible)\n"
-           "\t--bindless       - dump bindless descriptors contents (if possible)\n"
            "\t-L, --script=LUA - run specified lua script to analyze state\n"
            "\t-q, --query=REG  - query mode, dump only specified query registers on\n"
            "\t                   each draw; multiple --query/-q args can be given to\n"
@@ -105,7 +123,6 @@ static const struct option opts[] = {
       { "no-pager",        no_argument, &interactive,           0 },
       { "pager",           no_argument, &interactive,           1 },
       { "textures",        no_argument, &options.dump_textures, 1 },
-      { "bindless",        no_argument, &options.dump_bindless, 1 },
       { "show-compositor", no_argument, &show_comp,             1 },
       { "query-all",       no_argument, &options.query_mode,    QUERY_ALL },
       { "query-written",   no_argument, &options.query_mode,    QUERY_WRITTEN },
@@ -318,26 +335,16 @@ handle_file(const char *filename, int start, int end, int draw)
             uint32_t gpu_id = parse_gpu_id(ps.buf);
             if (!gpu_id)
                break;
-            options.dev_id.gpu_id = gpu_id;
-            printl(2, "gpu_id: %d\n", options.dev_id.gpu_id);
-
-            options.info = fd_dev_info_raw(&options.dev_id);
-            if (!options.info)
-               break;
-
+            options.gpu_id = gpu_id;
+            printl(2, "gpu_id: %d\n", options.gpu_id);
             cffdec_init(&options);
             got_gpu_id = 1;
          }
          break;
       case RD_CHIP_ID:
          if (!got_gpu_id) {
-            options.dev_id.chip_id = parse_chip_id(ps.buf);
-            printl(2, "chip_id: 0x%" PRIx64 "\n", options.dev_id.chip_id);
-
-            options.info = fd_dev_info_raw(&options.dev_id);
-            if (!options.info)
-               break;
-
+            options.gpu_id = parse_chip_id(ps.buf);
+            printl(2, "gpu_id: %d\n", options.gpu_id);
             cffdec_init(&options);
             got_gpu_id = 1;
          }
@@ -348,8 +355,6 @@ handle_file(const char *filename, int start, int end, int draw)
    }
 
    script_end_cmdstream();
-
-   reset_buffers();
 
    io_close(io);
    fflush(stdout);

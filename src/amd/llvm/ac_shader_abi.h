@@ -1,7 +1,24 @@
 /*
  * Copyright 2017 Advanced Micro Devices, Inc.
  *
- * SPDX-License-Identifier: MIT
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * on the rights to use, copy, modify, merge, publish, distribute, sub
+ * license, and/or sell copies of the Software, and to permit persons to whom
+ * the Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
+ * THE AUTHOR(S) AND/OR THEIR SUPPLIERS BE LIABLE FOR ANY CLAIM,
+ * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+ * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+ * USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
 #ifndef AC_SHADER_ABI_H
@@ -29,6 +46,9 @@ struct ac_shader_abi {
    LLVMValueRef vertex_id;
    LLVMValueRef vs_rel_patch_id;
    LLVMValueRef instance_id;
+   LLVMValueRef persp_centroid, linear_centroid;
+   LLVMValueRef color0, color1;
+   LLVMValueRef user_data;
 
    /* replaced registers when culling enabled */
    LLVMValueRef vertex_id_replaced;
@@ -38,9 +58,18 @@ struct ac_shader_abi {
    LLVMValueRef tes_rel_patch_id_replaced;
    LLVMValueRef tes_patch_id_replaced;
 
+   /* Varying -> attribute number mapping. Also NIR-only */
+   unsigned fs_input_attr_indices[MAX_VARYING];
+
+   void (*emit_primitive)(struct ac_shader_abi *abi, unsigned stream);
+
+   void (*emit_vertex_with_counter)(struct ac_shader_abi *abi, unsigned stream,
+                                    LLVMValueRef vertexidx, LLVMValueRef *addrs);
+
    LLVMValueRef (*load_tess_varyings)(struct ac_shader_abi *abi, LLVMTypeRef type,
+                                      LLVMValueRef vertex_index, LLVMValueRef param_index,
                                       unsigned driver_location, unsigned component,
-                                      unsigned num_components);
+                                      unsigned num_components, bool load_inputs);
 
    LLVMValueRef (*load_ubo)(struct ac_shader_abi *abi, LLVMValueRef index);
 
@@ -75,14 +104,27 @@ struct ac_shader_abi {
    /* Check for Inf interpolation coeff */
    bool kill_ps_if_inf_interp;
 
+   /* Whether undef values must be converted to zero */
+   bool convert_undef_to_zero;
+
    /* Clamp div by 0 (so it won't produce NaN) */
    bool clamp_div_by_zero;
 
    /* Whether to inline the compute dispatch size in user sgprs. */
    bool load_grid_size_from_user_sgpr;
 
+   /* Whether to detect divergent textures/samplers index and apply
+    * waterfall to avoid incorrect rendering. */
+   bool use_waterfall_for_divergent_tex_samplers;
+
    /* Whether to disable anisotropic filtering. */
    bool disable_aniso_single_level;
+
+   /* Equal to radeon_info::conformant_trunc_coord. */
+   bool conformant_trunc_coord;
+
+   /* Number of all interpolated inputs */
+   unsigned num_interp;
 };
 
 #endif /* AC_SHADER_ABI_H */

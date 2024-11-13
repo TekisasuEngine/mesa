@@ -5,7 +5,7 @@ The Mesa project began as an open-source implementation of the
 `OpenGL`_ specification - a system for rendering interactive 3D graphics.
 
 Over the years the project has grown to implement more graphics APIs,
-including `OpenGL ES`_, `OpenCL`_, `VDPAU`_, `VA-API`_,
+including `OpenGL ES`_, `OpenCL`_, `OpenMAX`_, `VDPAU`_, `VA-API`_,
 `Vulkan`_ and `EGL`_.
 
 A variety of device drivers allows the Mesa libraries to be used in many
@@ -19,6 +19,7 @@ Linux, FreeBSD, and other operating systems.
 .. _OpenGL: https://www.opengl.org/
 .. _OpenGL ES: https://www.khronos.org/opengles/
 .. _OpenCL: https://www.khronos.org/opencl/
+.. _OpenMAX: https://www.khronos.org/openmax/
 .. _VDPAU: https://en.wikipedia.org/wiki/VDPAU
 .. _VA-API: https://en.wikipedia.org/wiki/Video_Acceleration_API
 .. _Vulkan: https://www.vulkan.org/
@@ -75,7 +76,6 @@ Linux, FreeBSD, and other operating systems.
    gallium-nine
    viewperf
    xlibdriver
-   teflon
 
 .. toctree::
    :maxdepth: 1
@@ -88,9 +88,7 @@ Linux, FreeBSD, and other operating systems.
    drivers/freedreno
    drivers/lima
    drivers/llvmpipe
-   drivers/nvk
    drivers/panfrost
-   drivers/powervr
    drivers/radv
    drivers/svga3d
    drivers/v3d
@@ -111,7 +109,6 @@ Linux, FreeBSD, and other operating systems.
    devinfo
    codingstyle
    submittingpatches
-   rust
    releasing
    release-calendar
    dispatch
@@ -119,7 +116,6 @@ Linux, FreeBSD, and other operating systems.
    vulkan/index
    nir/index
    isl/index
-   isaspec
    rusticl
    android
    macos
@@ -141,3 +137,10 @@ Linux, FreeBSD, and other operating systems.
    OpenGL Website <https://www.opengl.org>
    DRI Website <https://dri.freedesktop.org>
    Developer Blogs <https://planet.freedesktop.org>
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Hosted by:
+   :hidden:
+
+   freedesktop.org <https://www.freedesktop.org>

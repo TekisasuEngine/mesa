@@ -36,7 +36,7 @@
  */
 
 
-#include "util/compiler.h"
+#include "pipe/p_compiler.h"
 #include "util/u_debug.h"
 
 #include "util/u_math.h"
@@ -54,7 +54,7 @@ struct util_cache_entry
    void *key;
    void *value;
 
-#if MESA_DEBUG
+#ifdef DEBUG
    unsigned count;
 #endif
 };
@@ -212,7 +212,7 @@ util_cache_set(struct util_cache *cache,
 
    util_cache_entry_destroy(cache, entry);
 
-#if MESA_DEBUG
+#ifdef DEBUG
    ++entry->count;
 #endif
 
@@ -288,7 +288,7 @@ util_cache_destroy(struct util_cache *cache)
    if (!cache)
       return;
 
-#if MESA_DEBUG
+#ifdef DEBUG
    if (cache->count >= 20*cache->size) {
       /* Normal approximation of the Poisson distribution */
       double mean = (double)cache->count/(double)cache->size;
@@ -340,7 +340,7 @@ util_cache_remove(struct util_cache *cache,
 static void
 ensure_sanity(const struct util_cache *cache)
 {
-#if MESA_DEBUG
+#ifdef DEBUG
    unsigned i, cnt = 0;
 
    assert(cache);

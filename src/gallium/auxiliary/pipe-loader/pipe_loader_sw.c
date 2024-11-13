@@ -31,7 +31,6 @@
 
 #include "pipe_loader_priv.h"
 
-#include "util/detect_os.h"
 #include "util/os_file.h"
 #include "util/u_memory.h"
 #include "util/u_dl.h"
@@ -79,7 +78,7 @@ static const struct sw_driver_descriptor driver_descriptors = {
          .create_winsys_kms_dri = kms_dri_create_winsys,
       },
 #endif
-#if !DETECT_OS_ANDROID
+#ifndef __ANDROID__
       {
          .name = "null",
          .create_winsys = null_sw_create,
@@ -108,7 +107,7 @@ static const struct sw_driver_descriptor kopper_driver_descriptors = {
          .create_winsys_kms_dri = kms_dri_create_winsys,
       },
 #endif
-#if !DETECT_OS_ANDROID
+#ifndef __ANDROID__
       {
          .name = "null",
          .create_winsys = null_sw_create,
@@ -136,7 +135,7 @@ pipe_loader_sw_probe_init_common(struct pipe_loader_sw_device *sdev)
    if (!sdev->dd)
       return false;
 #else
-   const char *search_dir = os_get_option("GALLIUM_PIPE_SEARCH_DIR");
+   const char *search_dir = getenv("GALLIUM_PIPE_SEARCH_DIR");
    if (search_dir == NULL)
       search_dir = PIPE_SEARCH_DIR;
 
@@ -171,7 +170,7 @@ pipe_loader_vk_probe_init_common(struct pipe_loader_sw_device *sdev)
    if (!sdev->dd)
       return false;
 #else
-   const char *search_dir = os_get_option("GALLIUM_PIPE_SEARCH_DIR");
+   const char *search_dir = getenv("GALLIUM_PIPE_SEARCH_DIR");
    if (search_dir == NULL)
       search_dir = PIPE_SEARCH_DIR;
 
@@ -234,7 +233,7 @@ fail:
 }
 #ifdef HAVE_ZINK
 bool
-pipe_loader_vk_probe_dri(struct pipe_loader_device **devs)
+pipe_loader_vk_probe_dri(struct pipe_loader_device **devs, const struct drisw_loader_funcs *drisw_lf)
 {
    struct pipe_loader_sw_device *sdev = CALLOC_STRUCT(pipe_loader_sw_device);
    int i;
@@ -247,7 +246,7 @@ pipe_loader_vk_probe_dri(struct pipe_loader_device **devs)
 
    for (i = 0; sdev->dd->winsys[i].name; i++) {
       if (strcmp(sdev->dd->winsys[i].name, "dri") == 0) {
-         sdev->ws = sdev->dd->winsys[i].create_winsys_dri(NULL);
+         sdev->ws = sdev->dd->winsys[i].create_winsys_dri(drisw_lf);
          break;
       }
    }
@@ -346,7 +345,7 @@ pipe_loader_sw_probe(struct pipe_loader_device **devs, int ndev)
    return i;
 }
 
-bool
+boolean
 pipe_loader_sw_probe_wrapped(struct pipe_loader_device **dev,
                              struct pipe_screen *screen)
 {
@@ -425,6 +424,8 @@ pipe_loader_sw_create_screen(struct pipe_loader_device *dev,
    struct pipe_screen *screen;
 
    screen = sdev->dd->create_screen(sdev->ws, config, sw_vk);
+   if (!screen)
+      sdev->ws->destroy(sdev->ws);
 
    return screen ? debug_screen_wrap(screen) : NULL;
 }

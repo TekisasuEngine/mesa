@@ -42,8 +42,6 @@ u_driconf_fill_st_options(struct st_config_options *options,
    query_bool_option(disable_arb_gpu_shader5);
    query_bool_option(disable_glsl_line_continuations);
    query_bool_option(disable_uniform_array_resize);
-   query_string_option(alias_shader_extension);
-   query_bool_option(allow_vertex_texture_bias);
    query_bool_option(force_compat_shaders);
    query_bool_option(force_glsl_extensions_warn);
    query_int_option(force_glsl_version);
@@ -71,11 +69,9 @@ u_driconf_fill_st_options(struct st_config_options *options,
    query_bool_option(force_gl_map_buffer_synchronized);
    query_bool_option(transcode_etc);
    query_bool_option(transcode_astc);
-   query_bool_option(allow_compressed_fallback);
    query_string_option(force_gl_vendor);
    query_string_option(force_gl_renderer);
    query_string_option(mesa_extension_override);
-   query_bool_option(allow_multisampled_copyteximage);
 
    driComputeOptionsSha1(optionCache, options->config_options_sha1);
 }

@@ -1,6 +1,24 @@
 /*
- * Copyright © 2012-2018 Rob Clark <robclark@freedesktop.org>
- * SPDX-License-Identifier: MIT
+ * Copyright (C) 2012-2018 Rob Clark <robclark@freedesktop.org>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  *
  * Authors:
  *    Rob Clark <robclark@freedesktop.org>
@@ -92,7 +110,6 @@ struct fd_ringbuffer_funcs {
     * the kernel would need to do a legacy reloc.
     */
    void (*emit_bo)(struct fd_ringbuffer *ring, struct fd_bo *bo);
-   void (*assert_attached)(struct fd_ringbuffer *ring, struct fd_bo *bo);
 
    void (*emit_reloc)(struct fd_ringbuffer *ring, const struct fd_reloc *reloc);
    uint32_t (*emit_reloc_ring)(struct fd_ringbuffer *ring,
@@ -211,14 +228,6 @@ fd_ringbuffer_attach_bo(struct fd_ringbuffer *ring, struct fd_bo *bo)
 }
 
 static inline void
-fd_ringbuffer_assert_attached(struct fd_ringbuffer *ring, struct fd_bo *bo)
-{
-#ifndef NDEBUG
-   ring->funcs->assert_attached(ring, bo);
-#endif
-}
-
-static inline void
 fd_ringbuffer_reloc(struct fd_ringbuffer *ring, const struct fd_reloc *reloc)
 {
    ring->funcs->emit_reloc(ring, reloc);
@@ -310,7 +319,7 @@ OUT_RELOC(struct fd_ringbuffer *ring, struct fd_bo *bo, uint32_t offset,
    uint64_t *cur = (uint64_t *)ring->cur;
    *cur = iova;
    ring->cur += 2;
-   fd_ringbuffer_assert_attached(ring, bo);
+   fd_ringbuffer_attach_bo(ring, bo);
 #else
    struct fd_reloc reloc = {
          .bo = bo,
@@ -366,14 +375,14 @@ static inline void
 OUT_PKT4(struct fd_ringbuffer *ring, uint16_t regindx, uint16_t cnt)
 {
    BEGIN_RING(ring, cnt + 1);
-   OUT_RING(ring, pm4_pkt4_hdr((uint16_t)regindx, (uint16_t)cnt));
+   OUT_RING(ring, pm4_pkt4_hdr(regindx, cnt));
 }
 
 static inline void
-OUT_PKT7(struct fd_ringbuffer *ring, uint32_t opcode, uint32_t cnt)
+OUT_PKT7(struct fd_ringbuffer *ring, uint8_t opcode, uint16_t cnt)
 {
    BEGIN_RING(ring, cnt + 1);
-   OUT_RING(ring, pm4_pkt7_hdr((uint8_t)opcode, (uint16_t)cnt));
+   OUT_RING(ring, pm4_pkt7_hdr(opcode, cnt));
 }
 
 static inline void

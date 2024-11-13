@@ -23,7 +23,7 @@
 
 #include "pipe/p_screen.h"
 
-#include "util/box.h"
+#include "util/u_box.h"
 #include "util/format/u_format.h"
 #include "util/format/u_format_zs.h"
 #include "util/u_inlines.h"
@@ -172,7 +172,7 @@ u_transfer_helper_resource_destroy(struct pipe_screen *pscreen,
    helper->vtbl->resource_destroy(pscreen, prsc);
 }
 
-static inline bool needs_pack(unsigned usage)
+static bool needs_pack(unsigned usage)
 {
    return (usage & PIPE_MAP_READ) &&
       !(usage & (PIPE_MAP_DISCARD_WHOLE_RESOURCE | PIPE_MAP_DISCARD_RANGE));
@@ -194,7 +194,6 @@ transfer_map_msaa(struct pipe_context *pctx,
    if (!trans)
       return NULL;
    struct pipe_transfer *ptrans = &trans->base;
-   bool need_pack = needs_pack(usage);
 
    pipe_resource_reference(&ptrans->resource, prsc);
    ptrans->level = level;
@@ -208,19 +207,14 @@ transfer_map_msaa(struct pipe_context *pctx,
          .height0 = box->height,
          .depth0 = 1,
          .array_size = 1,
-         .usage = need_pack ? PIPE_USAGE_STAGING : 0,
    };
-   if (util_format_is_depth_or_stencil(tmpl.format))
-      tmpl.bind |= PIPE_BIND_DEPTH_STENCIL;
-   else
-      tmpl.bind |= PIPE_BIND_RENDER_TARGET;
    trans->ss = pscreen->resource_create(pscreen, &tmpl);
    if (!trans->ss) {
       free(trans);
       return NULL;
    }
 
-   if (need_pack) {
+   if (needs_pack(usage)) {
       struct pipe_blit_info blit;
       memset(&blit, 0, sizeof(blit));
 
@@ -257,6 +251,13 @@ transfer_map_msaa(struct pipe_context *pctx,
    return ss_map;
 }
 
+static void *
+u_transfer_helper_deinterleave_transfer_map(struct pipe_context *pctx,
+                                            struct pipe_resource *prsc,
+                                            unsigned level, unsigned usage,
+                                            const struct pipe_box *box,
+                                            struct pipe_transfer **pptrans);
+
 void *
 u_transfer_helper_transfer_map(struct pipe_context *pctx,
                                struct pipe_resource *prsc,
@@ -290,7 +291,7 @@ u_transfer_helper_transfer_map(struct pipe_context *pctx,
    ptrans->usage = usage;
    ptrans->box   = *box;
    ptrans->stride = util_format_get_stride(format, box->width);
-   ptrans->layer_stride = (uint64_t)ptrans->stride * box->height;
+   ptrans->layer_stride = ptrans->stride * box->height;
 
    trans->staging = malloc(ptrans->layer_stride);
    if (!trans->staging)

@@ -95,29 +95,6 @@ get_autotune_fence(struct tu_autotune *at)
    return at->device->global_bo_map->autotune_fence;
 }
 
-template <chip CHIP>
-static void
-create_submission_fence(struct tu_device *dev,
-                        struct tu_cs *cs,
-                        uint32_t fence)
-{
-   uint64_t dst_iova = dev->global_bo->iova + gb_offset(autotune_fence);
-   if (CHIP >= A7XX) {
-      tu_cs_emit_pkt7(cs, CP_EVENT_WRITE7, 4);
-      tu_cs_emit(cs,
-         CP_EVENT_WRITE7_0(.event = CACHE_FLUSH_TS,
-                           .write_src = EV_WRITE_USER_32B,
-                           .write_dst = EV_DST_RAM,
-                           .write_enabled = true).value);
-   } else {
-      tu_cs_emit_pkt7(cs, CP_EVENT_WRITE, 4);
-      tu_cs_emit(cs, CP_EVENT_WRITE_0_EVENT(CACHE_FLUSH_TS));
-   }
-
-   tu_cs_emit_qw(cs, dst_iova);
-   tu_cs_emit(cs, fence);
-}
-
 static struct tu_submission_data *
 create_submission_data(struct tu_device *dev, struct tu_autotune *at,
                        uint32_t fence)
@@ -136,7 +113,12 @@ create_submission_data(struct tu_device *dev, struct tu_autotune *at,
 
    struct tu_cs* fence_cs = &submission_data->fence_cs;
    tu_cs_begin(fence_cs);
-   TU_CALLX(dev, create_submission_fence)(dev, fence_cs, fence);
+
+   tu_cs_emit_pkt7(fence_cs, CP_EVENT_WRITE, 4);
+   tu_cs_emit(fence_cs, CP_EVENT_WRITE_0_EVENT(CACHE_FLUSH_TS));
+   tu_cs_emit_qw(fence_cs, dev->global_bo->iova + gb_offset(autotune_fence));
+   tu_cs_emit(fence_cs, fence);
+
    tu_cs_end(fence_cs);
 
    list_addtail(&submission_data->node, &at->pending_submission_data);
@@ -553,17 +535,6 @@ tu_autotune_use_bypass(struct tu_autotune *at,
    if (cmd_buffer->state.rp.sysmem_single_prim_mode)
       return false;
 
-   /* If the user is using a fragment density map, then this will cause less
-    * FS invocations with GMEM, which has a hard-to-measure impact on
-    * performance because it depends on how heavy the FS is in addition to how
-    * many invocations there were and the density. Let's assume the user knows
-    * what they're doing when they added the map, because if sysmem is
-    * actually faster then they could've just not used the fragment density
-    * map.
-    */
-   if (pass->has_fdm)
-      return false;
-
    /* For VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT buffers
     * we would have to allocate GPU memory at the submit time and copy
     * results into it.
@@ -639,7 +610,6 @@ tu_autotune_use_bypass(struct tu_autotune *at,
    return fallback_use_bypass(pass, framebuffer, cmd_buffer);
 }
 
-template <chip CHIP>
 void
 tu_autotune_begin_renderpass(struct tu_cmd_buffer *cmd,
                              struct tu_cs *cs,
@@ -667,36 +637,13 @@ tu_autotune_begin_renderpass(struct tu_cmd_buffer *cmd,
          &autotune_result->bo);
 
    tu_cs_emit_regs(cs, A6XX_RB_SAMPLE_COUNT_CONTROL(.copy = true));
-   if (cmd->device->physical_device->info->a7xx.has_event_write_sample_count) {
-      tu_cs_emit_pkt7(cs, CP_EVENT_WRITE7, 3);
-      tu_cs_emit(cs, CP_EVENT_WRITE7_0(.event = ZPASS_DONE,
-                                       .write_sample_count = true).value);
-      tu_cs_emit_qw(cs, result_iova);
 
-      /* If the renderpass contains an occlusion query with its own ZPASS_DONE,
-       * we have to provide a fake ZPASS_DONE event here to logically close the
-       * previous one, preventing firmware from misbehaving due to nested events.
-       * This writes into the samples_end field, which will be overwritten in
-       * tu_autotune_end_renderpass.
-       */
-      if (cmd->state.rp.has_zpass_done_sample_count_write_in_rp) {
-         tu_cs_emit_pkt7(cs, CP_EVENT_WRITE7, 3);
-         tu_cs_emit(cs, CP_EVENT_WRITE7_0(.event = ZPASS_DONE,
-                                          .write_sample_count = true,
-                                          .sample_count_end_offset = true,
-                                          .write_accum_sample_count_diff = true).value);
-         tu_cs_emit_qw(cs, result_iova);
-      }
-   } else {
-      tu_cs_emit_regs(cs,
-                        A6XX_RB_SAMPLE_COUNT_ADDR(.qword = result_iova));
-      tu_cs_emit_pkt7(cs, CP_EVENT_WRITE, 1);
-      tu_cs_emit(cs, ZPASS_DONE);
-   }
+   tu_cs_emit_regs(cs, A6XX_RB_SAMPLE_COUNT_ADDR(.qword = result_iova));
+
+   tu_cs_emit_pkt7(cs, CP_EVENT_WRITE, 1);
+   tu_cs_emit(cs, ZPASS_DONE);
 }
-TU_GENX(tu_autotune_begin_renderpass);
 
-template <chip CHIP>
 void tu_autotune_end_renderpass(struct tu_cmd_buffer *cmd,
                                 struct tu_cs *cs,
                                 struct tu_renderpass_result *autotune_result)
@@ -707,37 +654,13 @@ void tu_autotune_end_renderpass(struct tu_cmd_buffer *cmd,
    if (!autotune_result->bo.iova)
       return;
 
-   uint64_t result_iova = autotune_result->bo.iova;
+   uint64_t result_iova = autotune_result->bo.iova +
+                          offsetof(struct tu_renderpass_samples, samples_end);
 
    tu_cs_emit_regs(cs, A6XX_RB_SAMPLE_COUNT_CONTROL(.copy = true));
 
-   if (cmd->device->physical_device->info->a7xx.has_event_write_sample_count) {
-      /* If the renderpass contains ZPASS_DONE events we emit a fake ZPASS_DONE
-       * event here, composing a pair of these events that firmware handles without
-       * issue. This first event writes into the samples_end field and the second
-       * event overwrites it. The second event also enables the accumulation flag
-       * even when we don't use that result because the blob always sets it.
-       */
-      if (cmd->state.rp.has_zpass_done_sample_count_write_in_rp) {
-         tu_cs_emit_pkt7(cs, CP_EVENT_WRITE7, 3);
-         tu_cs_emit(cs, CP_EVENT_WRITE7_0(.event = ZPASS_DONE,
-                                          .write_sample_count = true).value);
-         tu_cs_emit_qw(cs, result_iova + offsetof(struct tu_renderpass_samples, samples_end));
-      }
+   tu_cs_emit_regs(cs, A6XX_RB_SAMPLE_COUNT_ADDR(.qword = result_iova));
 
-      tu_cs_emit_pkt7(cs, CP_EVENT_WRITE7, 3);
-      tu_cs_emit(cs, CP_EVENT_WRITE7_0(.event = ZPASS_DONE,
-                                       .write_sample_count = true,
-                                       .sample_count_end_offset = true,
-                                       .write_accum_sample_count_diff = true).value);
-      tu_cs_emit_qw(cs, result_iova);
-   } else {
-      result_iova += offsetof(struct tu_renderpass_samples, samples_end);
-
-      tu_cs_emit_regs(cs,
-                        A6XX_RB_SAMPLE_COUNT_ADDR(.qword = result_iova));
-      tu_cs_emit_pkt7(cs, CP_EVENT_WRITE, 1);
-      tu_cs_emit(cs, ZPASS_DONE);
-   }
+   tu_cs_emit_pkt7(cs, CP_EVENT_WRITE, 1);
+   tu_cs_emit(cs, ZPASS_DONE);
 }
-TU_GENX(tu_autotune_end_renderpass);

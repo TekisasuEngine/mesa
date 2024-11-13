@@ -1,7 +1,7 @@
 EGL
 ===
 
-The current version of EGL in Mesa implements EGL 1.5. More information
+The current version of EGL in Mesa implements EGL 1.4. More information
 about EGL can be found at https://www.khronos.org/egl/.
 
 The Mesa's implementation of EGL uses a driver architecture. The main
@@ -18,7 +18,7 @@ Build EGL
 #. Configure your build with the desired client APIs and enable the
    driver for your hardware. For example:
 
-   .. code-block:: sh
+   .. code-block:: console
 
       $ meson configure \
               -D egl=enabled \
@@ -26,9 +26,10 @@ Build EGL
               -D gles2=enabled \
               -D gallium-drivers=...
 
-   The main EGL library and OpenGL are enabled by default. The two
-   ``gles*`` options after enable :doc:`OpenGL ES 1.x and 2.x+
-   <opengles>`. The last option enables the listed Gallium drivers.
+   The main library and OpenGL is enabled by default. The first two
+   options above enables :doc:`OpenGL ES 1.x and 2.x <opengles>`. The
+   last two options enables the listed classic and Gallium drivers
+   respectively.
 
 #. Build and install Mesa as usual.
 
@@ -159,7 +160,7 @@ EGL Drivers
    This driver can share DRI drivers with ``libGL``.
 
 ``haiku``
-   This driver supports only the `Haiku <https://www.haiku-os.org/>`__
+   This driver supports only the `Haiku <https://haiku-os.org>`__
    platform. It is also much less feature-complete than ``egl_dri2``,
    supporting only part of EGL 1.4 and none of the extensions beyond it.
 

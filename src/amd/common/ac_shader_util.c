@@ -1,7 +1,24 @@
 /*
  * Copyright 2012 Advanced Micro Devices, Inc.
  *
- * SPDX-License-Identifier: MIT
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
  */
 
 #include "ac_shader_util.h"
@@ -13,183 +30,6 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* Set NIR options shared by ACO, LLVM, RADV, and radeonsi. */
-void ac_set_nir_options(struct radeon_info *info, bool use_llvm,
-                        nir_shader_compiler_options *options)
-{
-   /*        |---------------------------------- Performance & Availability --------------------------------|
-    *        |MAD/MAC/MADAK/MADMK|MAD_LEGACY|MAC_LEGACY|    FMA     |FMAC/FMAAK/FMAMK|FMA_LEGACY|PK_FMA_F16,|Best choice
-    * Arch   |    F32,F16,F64    | F32,F16  | F32,F16  |F32,F16,F64 |    F32,F16     |   F32    |PK_FMAC_F16|F16,F32,F64
-    * ------------------------------------------------------------------------------------------------------------------
-    * gfx6,7 |     1 , - , -     |  1 , -   |  1 , -   |1/4, - ,1/16|     - , -      |    -     |   - , -   | - ,MAD,FMA
-    * gfx8   |     1 , 1 , -     |  1 , -   |  - , -   |1/4, 1 ,1/16|     - , -      |    -     |   - , -   |MAD,MAD,FMA
-    * gfx9   |     1 ,1|0, -     |  1 , -   |  - , -   | 1 , 1 ,1/16|    0|1, -      |    -     |   2 , -   |FMA,MAD,FMA
-    * gfx10  |     1 , - , -     |  1 , -   |  1 , -   | 1 , 1 ,1/16|     1 , 1      |    -     |   2 , 2   |FMA,MAD,FMA
-    * gfx10.3|     - , - , -     |  - , -   |  - , -   | 1 , 1 ,1/16|     1 , 1      |    1     |   2 , 2   |  all FMA
-    * gfx11  |     - , - , -     |  - , -   |  - , -   | 2 , 2 ,1/16|     2 , 2      |    2     |   2 , 2   |  all FMA
-    *
-    * Tahiti, Hawaii, Carrizo, Vega20: FMA_F32 is full rate, FMA_F64 is 1/4
-    * gfx9 supports MAD_F16 only on Vega10, Raven, Raven2, Renoir.
-    * gfx9 supports FMAC_F32 only on Vega20, but doesn't support FMAAK and FMAMK.
-    *
-    * gfx8 prefers MAD for F16 because of MAC/MADAK/MADMK.
-    * gfx9 and newer prefer FMA for F16 because of the packed instruction.
-    * gfx10 and older prefer MAD for F32 because of the legacy instruction.
-    */
-
-   memset(options, 0, sizeof(*options));
-   options->vertex_id_zero_based = true;
-   options->lower_scmp = true;
-   options->lower_flrp16 = true;
-   options->lower_flrp32 = true;
-   options->lower_flrp64 = true;
-   options->lower_device_index_to_zero = true;
-   options->lower_fdiv = true;
-   options->lower_fmod = true;
-   options->lower_ineg = true;
-   options->lower_bitfield_insert = true;
-   options->lower_bitfield_extract = true;
-   options->lower_pack_snorm_4x8 = true;
-   options->lower_pack_unorm_4x8 = true;
-   options->lower_pack_half_2x16 = true;
-   options->lower_pack_64_2x32 = true;
-   options->lower_pack_64_4x16 = true;
-   options->lower_pack_32_2x16 = true;
-   options->lower_unpack_snorm_2x16 = true;
-   options->lower_unpack_snorm_4x8 = true;
-   options->lower_unpack_unorm_2x16 = true;
-   options->lower_unpack_unorm_4x8 = true;
-   options->lower_unpack_half_2x16 = true;
-   options->lower_fpow = true;
-   options->lower_mul_2x32_64 = true;
-   options->lower_iadd_sat = info->gfx_level <= GFX8;
-   options->lower_hadd = true;
-   options->lower_mul_32x16 = true;
-   options->has_bfe = true;
-   options->has_bfm = true;
-   options->has_bitfield_select = true;
-   options->has_fneo_fcmpu = true;
-   options->has_ford_funord = true;
-   options->has_fsub = true;
-   options->has_isub = true;
-   options->has_sdot_4x8 = info->has_accelerated_dot_product;
-   options->has_sudot_4x8 = info->has_accelerated_dot_product && info->gfx_level >= GFX11;
-   options->has_udot_4x8 = info->has_accelerated_dot_product;
-   options->has_sdot_4x8_sat = info->has_accelerated_dot_product;
-   options->has_sudot_4x8_sat = info->has_accelerated_dot_product && info->gfx_level >= GFX11;
-   options->has_udot_4x8_sat = info->has_accelerated_dot_product;
-   options->has_dot_2x16 = info->has_accelerated_dot_product && info->gfx_level < GFX11;
-   options->has_find_msb_rev = true;
-   options->has_pack_32_4x8 = true;
-   options->has_pack_half_2x16_rtz = true;
-   options->has_bit_test = !use_llvm;
-   options->has_fmulz = true;
-   options->has_msad = true;
-   options->has_shfr32 = true;
-   options->use_interpolated_input_intrinsics = true;
-   options->lower_int64_options = nir_lower_imul64 | nir_lower_imul_high64 | nir_lower_imul_2x32_64 | nir_lower_divmod64 |
-                                  nir_lower_minmax64 | nir_lower_iabs64 | nir_lower_iadd_sat64 | nir_lower_conv64;
-   options->divergence_analysis_options = nir_divergence_view_index_uniform;
-   options->optimize_quad_vote_to_reduce = !use_llvm;
-   options->lower_fisnormal = true;
-   options->support_16bit_alu = info->gfx_level >= GFX8;
-   options->vectorize_vec2_16bit = info->has_packed_math_16bit;
-   options->discard_is_demote = true;
-   options->io_options = nir_io_has_flexible_input_interpolation_except_flat |
-                         (info->gfx_level >= GFX8 ? nir_io_16bit_input_output_support : 0) |
-                         nir_io_prefer_scalar_fs_inputs |
-                         nir_io_mix_convergent_flat_with_interpolated |
-                         nir_io_vectorizer_ignores_types;
-   options->scalarize_ddx = true;
-   options->skip_lower_packing_ops =
-      BITFIELD_BIT(nir_lower_packing_op_unpack_64_2x32) |
-      BITFIELD_BIT(nir_lower_packing_op_unpack_64_4x16) |
-      BITFIELD_BIT(nir_lower_packing_op_unpack_32_2x16) |
-      BITFIELD_BIT(nir_lower_packing_op_pack_32_4x8) |
-      BITFIELD_BIT(nir_lower_packing_op_unpack_32_4x8);
-}
-
-bool
-ac_nir_mem_vectorize_callback(unsigned align_mul, unsigned align_offset, unsigned bit_size,
-                              unsigned num_components, unsigned hole_size, nir_intrinsic_instr *low,
-                              nir_intrinsic_instr *high, void *data)
-{
-   if (num_components > 4 || hole_size)
-      return false;
-
-   bool is_scratch = false;
-   switch (low->intrinsic) {
-   case nir_intrinsic_load_stack:
-   case nir_intrinsic_load_scratch:
-   case nir_intrinsic_store_stack:
-   case nir_intrinsic_store_scratch:
-      is_scratch = true;
-      break;
-   default:
-      break;
-   }
-
-   /* >128 bit loads are split except with SMEM. On GFX6-8, >32 bit scratch loads are split. */
-   enum amd_gfx_level gfx_level = *(enum amd_gfx_level *)data;
-   if (bit_size * num_components > (is_scratch && gfx_level <= GFX8 ? 32 : 128))
-      return false;
-
-   uint32_t align;
-   if (align_offset)
-      align = 1 << (ffs(align_offset) - 1);
-   else
-      align = align_mul;
-
-   switch (low->intrinsic) {
-   case nir_intrinsic_load_global:
-   case nir_intrinsic_load_global_constant:
-   case nir_intrinsic_store_global:
-   case nir_intrinsic_store_ssbo:
-   case nir_intrinsic_load_ssbo:
-   case nir_intrinsic_load_ubo:
-   case nir_intrinsic_load_push_constant:
-   case nir_intrinsic_load_stack:
-   case nir_intrinsic_load_scratch:
-   case nir_intrinsic_store_stack:
-   case nir_intrinsic_store_scratch: {
-      unsigned max_components;
-      if (align % 4 == 0)
-         max_components = NIR_MAX_VEC_COMPONENTS;
-      else if (align % 2 == 0)
-         max_components = 16u / bit_size;
-      else
-         max_components = 8u / bit_size;
-      return (align % (bit_size / 8u)) == 0 && num_components <= max_components;
-   }
-   case nir_intrinsic_load_deref:
-   case nir_intrinsic_store_deref:
-      assert(nir_deref_mode_is(nir_src_as_deref(low->src[0]), nir_var_mem_shared));
-      FALLTHROUGH;
-   case nir_intrinsic_load_shared:
-   case nir_intrinsic_store_shared:
-      if (bit_size * num_components == 96) { /* 96 bit loads require 128 bit alignment and are split otherwise */
-         return align % 16 == 0;
-      } else if (bit_size == 16 && (align % 4)) {
-         /* AMD hardware can't do 2-byte aligned f16vec2 loads, but they are useful for ALU
-          * vectorization, because our vectorizer requires the scalar IR to already contain vectors.
-          */
-         return (align % 2 == 0) && num_components <= 2;
-      } else {
-         if (num_components == 3) {
-            /* AMD hardware can't do 3-component loads except for 96-bit loads, handled above. */
-            return false;
-         }
-         unsigned req = bit_size * num_components;
-         if (req == 64 || req == 128) /* 64-bit and 128-bit loads can use ds_read2_b{32,64} */
-            req /= 2u;
-         return align % (req / 8u) == 0;
-      }
-   default:
-      return false;
-   }
-   return false;
-}
 
 unsigned ac_get_spi_shader_z_format(bool writes_z, bool writes_stencil, bool writes_samplemask,
                                     bool writes_mrt0_alpha)
@@ -524,7 +364,7 @@ unsigned ac_get_tbuffer_format(enum amd_gfx_level gfx_level, unsigned dfmt, unsi
       // Use the regularity properties of the combined format enum.
       //
       // Note: float is incompatible with 8-bit data formats,
-      //       [us]{norm,scaled} are incompatible with 32-bit data formats.
+      //       [us]{norm,scaled} are incomparible with 32-bit data formats.
       //       [us]scaled are not writable.
       switch (nfmt) {
       case V_008F0C_BUF_NUM_FORMAT_UNORM:
@@ -797,10 +637,14 @@ enum ac_image_dim ac_get_image_dim(enum amd_gfx_level gfx_level, enum glsl_sampl
 }
 
 unsigned ac_get_fs_input_vgpr_cnt(const struct ac_shader_config *config,
-                                  uint8_t *num_fragcoord_components)
+                                  signed char *face_vgpr_index_ptr,
+                                  signed char *ancillary_vgpr_index_ptr,
+                                  signed char *sample_coverage_vgpr_index_ptr)
 {
    unsigned num_input_vgprs = 0;
-   unsigned fragcoord_components = 0;
+   signed char face_vgpr_index = -1;
+   signed char ancillary_vgpr_index = -1;
+   signed char sample_coverage_vgpr_index = -1;
 
    if (G_0286CC_PERSP_SAMPLE_ENA(config->spi_ps_input_addr))
       num_input_vgprs += 2;
@@ -818,51 +662,37 @@ unsigned ac_get_fs_input_vgpr_cnt(const struct ac_shader_config *config,
       num_input_vgprs += 2;
    if (G_0286CC_LINE_STIPPLE_TEX_ENA(config->spi_ps_input_addr))
       num_input_vgprs += 1;
-   if (G_0286CC_POS_X_FLOAT_ENA(config->spi_ps_input_addr)) {
+   if (G_0286CC_POS_X_FLOAT_ENA(config->spi_ps_input_addr))
       num_input_vgprs += 1;
-      fragcoord_components++;
+   if (G_0286CC_POS_Y_FLOAT_ENA(config->spi_ps_input_addr))
+      num_input_vgprs += 1;
+   if (G_0286CC_POS_Z_FLOAT_ENA(config->spi_ps_input_addr))
+      num_input_vgprs += 1;
+   if (G_0286CC_POS_W_FLOAT_ENA(config->spi_ps_input_addr))
+      num_input_vgprs += 1;
+   if (G_0286CC_FRONT_FACE_ENA(config->spi_ps_input_addr)) {
+      face_vgpr_index = num_input_vgprs;
+      num_input_vgprs += 1;
    }
-   if (G_0286CC_POS_Y_FLOAT_ENA(config->spi_ps_input_addr)) {
+   if (G_0286CC_ANCILLARY_ENA(config->spi_ps_input_addr)) {
+      ancillary_vgpr_index = num_input_vgprs;
       num_input_vgprs += 1;
-      fragcoord_components++;
    }
-   if (G_0286CC_POS_Z_FLOAT_ENA(config->spi_ps_input_addr)) {
+   if (G_0286CC_SAMPLE_COVERAGE_ENA(config->spi_ps_input_addr)) {
+      sample_coverage_vgpr_index = num_input_vgprs;
       num_input_vgprs += 1;
-      fragcoord_components++;
    }
-   if (G_0286CC_POS_W_FLOAT_ENA(config->spi_ps_input_addr)) {
-      num_input_vgprs += 1;
-      fragcoord_components++;
-   }
-   if (G_0286CC_FRONT_FACE_ENA(config->spi_ps_input_addr))
-      num_input_vgprs += 1;
-   if (G_0286CC_ANCILLARY_ENA(config->spi_ps_input_addr))
-      num_input_vgprs += 1;
-   if (G_0286CC_SAMPLE_COVERAGE_ENA(config->spi_ps_input_addr))
-      num_input_vgprs += 1;
    if (G_0286CC_POS_FIXED_PT_ENA(config->spi_ps_input_addr))
       num_input_vgprs += 1;
 
-   if (num_fragcoord_components)
-      *num_fragcoord_components = fragcoord_components;
+   if (face_vgpr_index_ptr)
+      *face_vgpr_index_ptr = face_vgpr_index;
+   if (ancillary_vgpr_index_ptr)
+      *ancillary_vgpr_index_ptr = ancillary_vgpr_index;
+   if (sample_coverage_vgpr_index_ptr)
+      *sample_coverage_vgpr_index_ptr = sample_coverage_vgpr_index;
 
    return num_input_vgprs;
-}
-
-uint16_t ac_get_ps_iter_mask(unsigned ps_iter_samples)
-{
-   /* The bit pattern matches that used by fixed function fragment
-    * processing.
-    */
-   switch (ps_iter_samples) {
-   case 1: return 0xffff;
-   case 2: return 0x5555;
-   case 4: return 0x1111;
-   case 8: return 0x0101;
-   case 16: return 0x0001;
-   default:
-      unreachable("invalid sample count");
-   }
 }
 
 void ac_choose_spi_color_formats(unsigned format, unsigned swap, unsigned ntype,
@@ -997,9 +827,6 @@ void ac_compute_late_alloc(const struct radeon_info *info, bool ngg, bool ngg_cu
    *late_alloc_wave64 = 0; /* The limit is per SA. */
    *cu_mask = 0xffff;
 
-   /* This should never be called on gfx12. Gfx12 doesn't need to mask CUs for late alloc. */
-   assert(info->gfx_level < GFX12);
-
    /* CU masking can decrease performance and cause a hang with <= 2 CUs per SA. */
    if (info->min_good_cu_per_sa <= 2)
       return;
@@ -1131,93 +958,6 @@ unsigned ac_compute_ngg_workgroup_size(unsigned es_verts, unsigned gs_inst_prims
    return CLAMP(workgroup_size, 1, 256);
 }
 
-uint32_t ac_compute_num_tess_patches(const struct radeon_info *info, uint32_t num_tcs_input_cp,
-                                     uint32_t num_tcs_output_cp, uint32_t vram_per_patch,
-                                     uint32_t lds_per_patch, uint32_t wave_size,
-                                     bool tess_uses_primid)
-{
-   /* The VGT HS block increments the patch ID unconditionally
-    * within a single threadgroup. This results in incorrect
-    * patch IDs when instanced draws are used.
-    *
-    * The intended solution is to restrict threadgroups to
-    * a single instance by setting SWITCH_ON_EOI, which
-    * should cause IA to split instances up. However, this
-    * doesn't work correctly on GFX6 when there is no other
-    * SE to switch to.
-    */
-   const bool has_primid_instancing_bug = info->gfx_level == GFX6 && info->max_se == 1;
-   if (has_primid_instancing_bug && tess_uses_primid)
-      return 1;
-
-   /* Ensure that we only need 4 waves per CU, so that we don't need to check
-    * resource usage (such as whether we have enough VGPRs to fit the whole
-    * threadgroup into the CU). It also ensures that the number of tcs in and out
-    * vertices per threadgroup are at most 256, which is the hw limit.
-    */
-   const unsigned max_verts_per_patch = MAX2(num_tcs_input_cp, num_tcs_output_cp);
-   unsigned num_patches = 256 / max_verts_per_patch;
-
-   /* Not necessary for correctness, but higher numbers are slower.
-    * The hardware can do more, but we prefer fully occupied waves.
-    * eg. 64 triangle patches means 3 fully occupied Wave64 waves.
-    */
-   num_patches = MIN2(num_patches, 64);
-
-   /* When distributed tessellation is unsupported, switch between SEs
-    * at a higher frequency to manually balance the workload between SEs.
-    */
-   if (!info->has_distributed_tess && info->max_se > 1)
-      num_patches = MIN2(num_patches, 16); /* recommended */
-
-   /* Make sure the output data fits in the offchip buffer */
-   if (vram_per_patch) {
-      const uint32_t tess_offchip_block_dw_size = info->family == CHIP_HAWAII ? 4096 : 8192;
-      num_patches =
-         MIN2(num_patches, (tess_offchip_block_dw_size * 4) / vram_per_patch);
-   }
-
-   /* Make sure that the data fits in LDS. This assumes the shaders only
-    * use LDS for the inputs and outputs.
-    */
-   if (lds_per_patch) {
-      ASSERTED const unsigned max_lds_size = info->gfx_level >= GFX9 ? 64 * 1024 : 32 * 1024; /* hw limit */
-      const unsigned target_lds_size = max_lds_size / 2; /* target at least 2 workgroups per CU */
-      num_patches = MIN2(num_patches, target_lds_size / lds_per_patch);
-      assert(num_patches * lds_per_patch <= max_lds_size);
-   }
-   num_patches = MAX2(num_patches, 1);
-
-   /* Make sure that vector lanes are fully occupied by cutting off the last wave
-    * if it's only partially filled.
-    */
-   const unsigned temp_verts_per_tg = num_patches * max_verts_per_patch;
-
-   if (temp_verts_per_tg > wave_size &&
-       (wave_size - temp_verts_per_tg % wave_size >= MAX2(max_verts_per_patch, 8)))
-      num_patches = (temp_verts_per_tg & ~(wave_size - 1)) / max_verts_per_patch;
-
-   if (info->gfx_level == GFX6) {
-      /* GFX6 bug workaround, related to power management. Limit LS-HS
-       * threadgroups to only one wave.
-       */
-      const unsigned one_wave = wave_size / max_verts_per_patch;
-      num_patches = MIN2(num_patches, one_wave);
-   }
-
-   return num_patches;
-}
-
-uint32_t
-ac_compute_tess_lds_size(const struct radeon_info *info, uint32_t lds_per_patch, uint32_t num_patches)
-{
-   const unsigned lds_size = lds_per_patch * num_patches;
-
-   assert(lds_size <= (info->gfx_level >= GFX9 ? 65536 : 32768));
-
-   return align(lds_size, info->lds_encode_granularity) / info->lds_encode_granularity;
-}
-
 uint32_t ac_apply_cu_en(uint32_t value, uint32_t clear_mask, unsigned value_shift,
                         const struct radeon_info *info)
 {
@@ -1226,16 +966,6 @@ uint32_t ac_apply_cu_en(uint32_t value, uint32_t clear_mask, unsigned value_shif
    unsigned cu_en_shift = ffs(cu_en_mask) - 1;
    /* The value being set. */
    uint32_t cu_en = (value & cu_en_mask) >> cu_en_shift;
-
-   uint32_t set_cu_en = info->spi_cu_en;
-
-   if (info->gfx_level >= GFX12 && clear_mask == 0) {
-      /* The CU mask has 32 bits and is per SE, not per SA. This math doesn't work with
-       * asymmetric WGP harvesting because SA0 doesn't always end on the same bit.
-       */
-      set_cu_en &= BITFIELD_MASK(info->max_good_cu_per_sa);
-      set_cu_en |= set_cu_en << info->max_good_cu_per_sa;
-   }
 
    /* AND the field by spi_cu_en. */
    uint32_t spi_cu_en = info->spi_cu_en >> value_shift;
@@ -1278,204 +1008,9 @@ void ac_get_scratch_tmpring_size(const struct radeon_info *info,
 
    unsigned max_scratch_waves = info->max_scratch_waves;
    if (info->gfx_level >= GFX11)
-      max_scratch_waves /= info->max_se; /* WAVES is per SE */
+      max_scratch_waves /= info->num_se; /* WAVES is per SE */
 
    /* TODO: We could decrease WAVES to make the whole buffer fit into the infinity cache. */
    *tmpring_size = S_0286E8_WAVES(max_scratch_waves) |
                    S_0286E8_WAVESIZE(*max_seen_bytes_per_wave >> size_shift);
-}
-
-/* Get chip-agnostic memory instruction access flags (as opposed to chip-specific GLC/DLC/SLC)
- * from a NIR memory intrinsic.
- */
-enum gl_access_qualifier ac_get_mem_access_flags(const nir_intrinsic_instr *instr)
-{
-   enum gl_access_qualifier access =
-      nir_intrinsic_has_access(instr) ? nir_intrinsic_access(instr) : 0;
-
-   /* Determine ACCESS_MAY_STORE_SUBDWORD. (for the GFX6 TC L1 bug workaround) */
-   if (!nir_intrinsic_infos[instr->intrinsic].has_dest) {
-      switch (instr->intrinsic) {
-      case nir_intrinsic_bindless_image_store:
-         access |= ACCESS_MAY_STORE_SUBDWORD;
-         break;
-
-      case nir_intrinsic_store_ssbo:
-      case nir_intrinsic_store_buffer_amd:
-      case nir_intrinsic_store_global:
-      case nir_intrinsic_store_global_amd:
-         if (access & ACCESS_USES_FORMAT_AMD ||
-             (nir_intrinsic_has_align_offset(instr) && nir_intrinsic_align(instr) % 4 != 0) ||
-             ((instr->src[0].ssa->bit_size / 8) * instr->src[0].ssa->num_components) % 4 != 0)
-            access |= ACCESS_MAY_STORE_SUBDWORD;
-         break;
-
-      default:
-         unreachable("unexpected store instruction");
-      }
-   }
-
-   return access;
-}
-
-/* Convert chip-agnostic memory access flags into hw-specific cache flags.
- *
- * "access" must be a result of ac_get_mem_access_flags() with the appropriate ACCESS_TYPE_*
- * flags set.
- */
-union ac_hw_cache_flags ac_get_hw_cache_flags(enum amd_gfx_level gfx_level,
-                                              enum gl_access_qualifier access)
-{
-   union ac_hw_cache_flags result;
-   result.value = 0;
-
-   assert(util_bitcount(access & (ACCESS_TYPE_LOAD | ACCESS_TYPE_STORE |
-                                  ACCESS_TYPE_ATOMIC)) == 1);
-   assert(!(access & ACCESS_TYPE_SMEM) || access & ACCESS_TYPE_LOAD);
-   assert(!(access & ACCESS_IS_SWIZZLED_AMD) || !(access & ACCESS_TYPE_SMEM));
-   assert(!(access & ACCESS_MAY_STORE_SUBDWORD) || access & ACCESS_TYPE_STORE);
-
-   bool scope_is_device = access & (ACCESS_COHERENT | ACCESS_VOLATILE);
-
-   if (gfx_level >= GFX12) {
-      if (access & ACCESS_CP_GE_COHERENT_AMD) {
-         bool cp_sdma_ge_use_system_memory_scope = gfx_level == GFX12;
-         result.gfx12.scope = cp_sdma_ge_use_system_memory_scope ?
-                                 gfx12_scope_memory : gfx12_scope_device;
-      } else if (scope_is_device) {
-         result.gfx12.scope = gfx12_scope_device;
-      } else {
-         result.gfx12.scope = gfx12_scope_cu;
-      }
-
-      if (access & ACCESS_NON_TEMPORAL) {
-         if (access & ACCESS_TYPE_LOAD) {
-            /* Don't use non_temporal for SMEM because it can't set regular_temporal for MALL. */
-            if (!(access & ACCESS_TYPE_SMEM))
-               result.gfx12.temporal_hint = gfx12_load_near_non_temporal_far_regular_temporal;
-         } else if (access & ACCESS_TYPE_STORE) {
-            result.gfx12.temporal_hint = gfx12_store_near_non_temporal_far_regular_temporal;
-         } else {
-            result.gfx12.temporal_hint = gfx12_atomic_non_temporal;
-         }
-      }
-   } else if (gfx_level >= GFX11) {
-      /* GFX11 simplified it and exposes what is actually useful.
-       *
-       * GLC means device scope for loads only. (stores and atomics are always device scope)
-       * SLC means non-temporal for GL1 and GL2 caches. (GL1 = hit-evict, GL2 = stream, unavailable in SMEM)
-       * DLC means non-temporal for MALL. (noalloc, i.e. coherent bypass)
-       *
-       * GL0 doesn't have a non-temporal flag, so you always get LRU caching in CU scope.
-       */
-      if (access & ACCESS_TYPE_LOAD && scope_is_device)
-         result.value |= ac_glc;
-
-      if (access & ACCESS_NON_TEMPORAL && !(access & ACCESS_TYPE_SMEM))
-         result.value |= ac_slc;
-   } else if (gfx_level >= GFX10) {
-      /* GFX10-10.3:
-       *
-       * VMEM and SMEM loads (SMEM only supports the first four):
-       * !GLC && !DLC && !SLC means CU scope          <== use for normal loads with CU scope
-       *  GLC && !DLC && !SLC means SA scope
-       * !GLC &&  DLC && !SLC means CU scope, GL1 bypass
-       *  GLC &&  DLC && !SLC means device scope      <== use for normal loads with device scope
-       * !GLC && !DLC &&  SLC means CU scope, non-temporal (GL0 = GL1 = hit-evict, GL2 = stream)  <== use for non-temporal loads with CU scope
-       *  GLC && !DLC &&  SLC means SA scope, non-temporal (GL1 = hit-evict, GL2 = stream)
-       * !GLC &&  DLC &&  SLC means CU scope, GL0 non-temporal, GL1-GL2 coherent bypass (GL0 = hit-evict, GL1 = bypass, GL2 = noalloc)
-       *  GLC &&  DLC &&  SLC means device scope, GL2 coherent bypass (noalloc)  <== use for non-temporal loads with device scope
-       *
-       * VMEM stores/atomics (stores are CU scope only if they overwrite the whole cache line,
-       * atomics are always device scope, GL1 is always bypassed):
-       * !GLC && !DLC && !SLC means CU scope          <== use for normal stores with CU scope
-       *  GLC && !DLC && !SLC means device scope      <== use for normal stores with device scope
-       * !GLC &&  DLC && !SLC means CU scope, GL2 non-coherent bypass
-       *  GLC &&  DLC && !SLC means device scope, GL2 non-coherent bypass
-       * !GLC && !DLC &&  SLC means CU scope, GL2 non-temporal (stream)  <== use for non-temporal stores with CU scope
-       *  GLC && !DLC &&  SLC means device scope, GL2 non-temporal (stream)  <== use for non-temporal stores with device scope
-       * !GLC &&  DLC &&  SLC means CU scope, GL2 coherent bypass (noalloc)
-       *  GLC &&  DLC &&  SLC means device scope, GL2 coherent bypass (noalloc)
-       *
-       * "stream" allows write combining in GL2. "coherent bypass" doesn't.
-       * "non-coherent bypass" doesn't guarantee ordering with any coherent stores.
-       */
-      if (scope_is_device && !(access & ACCESS_TYPE_ATOMIC))
-         result.value |= ac_glc | (access & ACCESS_TYPE_LOAD ? ac_dlc : 0);
-
-      if (access & ACCESS_NON_TEMPORAL && !(access & ACCESS_TYPE_SMEM))
-         result.value |= ac_slc;
-   } else {
-      /* GFX6-GFX9:
-       *
-       * VMEM loads:
-       * !GLC && !SLC means CU scope
-       *  GLC && !SLC means (GFX6: device scope, GFX7-9: device scope [*])
-       * !GLC &&  SLC means (GFX6: CU scope, GFX7: device scope, GFX8-9: CU scope), GL2 non-temporal (stream)
-       *  GLC &&  SLC means device scope, GL2 non-temporal (stream)
-       *
-       * VMEM stores (atomics don't have [*]):
-       * !GLC && !SLC means (GFX6: CU scope, GFX7-9: device scope [*])
-       *  GLC && !SLC means (GFX6-7: device scope, GFX8-9: device scope [*])
-       * !GLC &&  SLC means (GFX6: CU scope, GFX7-9: device scope [*]), GL2 non-temporal (stream)
-       *  GLC &&  SLC means device scope, GL2 non-temporal (stream)
-       *
-       * [*] data can be cached in GL1 for future CU scope
-       *
-       * SMEM loads:
-       *  GLC means device scope (available on GFX8+)
-       */
-      if (scope_is_device && !(access & ACCESS_TYPE_ATOMIC)) {
-         /* SMEM doesn't support the device scope on GFX6-7. */
-         assert(gfx_level >= GFX8 || !(access & ACCESS_TYPE_SMEM));
-         result.value |= ac_glc;
-      }
-
-      if (access & ACCESS_NON_TEMPORAL && !(access & ACCESS_TYPE_SMEM))
-         result.value |= ac_slc;
-
-      /* GFX6 has a TC L1 bug causing corruption of 8bit/16bit stores. All store opcodes not
-       * aligned to a dword are affected.
-       */
-      if (gfx_level == GFX6 && access & ACCESS_MAY_STORE_SUBDWORD)
-         result.value |= ac_glc;
-   }
-
-   if (access & ACCESS_IS_SWIZZLED_AMD) {
-      if (gfx_level >= GFX12)
-         result.gfx12.swizzled = true;
-      else
-         result.value |= ac_swizzled;
-   }
-
-   return result;
-}
-
-unsigned ac_get_all_edge_flag_bits(enum amd_gfx_level gfx_level)
-{
-   return gfx_level >= GFX12 ?
-            ((1u << 8) | (1u << 17) | (1u << 26)) :
-            ((1u << 9) | (1u << 19) | (1u << 29));
-}
-
-/**
- * Returns a unique index for a per-patch semantic name and index. The index
- * must be less than 32, so that a 32-bit bitmask of used inputs or outputs
- * can be calculated.
- */
-unsigned
-ac_shader_io_get_unique_index_patch(unsigned semantic)
-{
-   switch (semantic) {
-   case VARYING_SLOT_TESS_LEVEL_OUTER:
-      return 0;
-   case VARYING_SLOT_TESS_LEVEL_INNER:
-      return 1;
-   default:
-      if (semantic >= VARYING_SLOT_PATCH0 && semantic < VARYING_SLOT_PATCH0 + 30)
-         return 2 + (semantic - VARYING_SLOT_PATCH0);
-
-      assert(!"invalid semantic");
-      return 0;
-   }
 }

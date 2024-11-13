@@ -28,31 +28,27 @@
 #include "util/u_math.h"
 
 static bool
-lower_printf_intrin(nir_builder *b, nir_intrinsic_instr *prntf, void *_options)
+lower_printf_instr(nir_builder *b, nir_instr *instr, void *_options)
 {
    const nir_lower_printf_options *options = _options;
+   if (instr->type != nir_instr_type_intrinsic)
+      return false;
+
+   nir_intrinsic_instr *prntf = nir_instr_as_intrinsic(instr);
    if (prntf->intrinsic != nir_intrinsic_printf)
       return false;
 
-   b->cursor = nir_before_instr(&prntf->instr);
-
-   nir_def *fmt_str_id = prntf->src[0].ssa;
-   if (options && options->use_printf_base_identifier) {
-      fmt_str_id = nir_iadd(b,
-                            nir_load_printf_base_identifier(b),
-                            fmt_str_id);
-   }
-
+   nir_ssa_def *fmt_str_id = prntf->src[0].ssa;
    nir_deref_instr *args = nir_src_as_deref(prntf->src[1]);
    assert(args->deref_type == nir_deref_type_var);
 
-   const unsigned ptr_bit_size = options->ptr_bit_size != 0 ?
-      options->ptr_bit_size : nir_get_ptr_bitsize(b->shader);
+   const unsigned ptr_bit_size = nir_get_ptr_bitsize(b->shader);
 
    /* Atomic add a buffer size counter to determine where to write.  If
     * overflowed, return -1, otherwise, store the arguments and return 0.
     */
-   nir_def *buffer_addr = nir_load_printf_buffer_address(b, ptr_bit_size);
+   b->cursor = nir_before_instr(&prntf->instr);
+   nir_ssa_def *buffer_addr = nir_load_printf_buffer_address(b, ptr_bit_size);
    nir_deref_instr *buffer =
       nir_build_deref_cast(b, buffer_addr, nir_var_mem_global,
                            glsl_array_type(glsl_uint8_t_type(), 0, 4), 0);
@@ -66,30 +62,30 @@ lower_printf_intrin(nir_builder *b, nir_intrinsic_instr *prntf, void *_options)
    /* Increment the counter at the beginning of the buffer */
    const unsigned counter_size = 4;
    nir_deref_instr *counter = nir_build_deref_array_imm(b, buffer, 0);
-   counter = nir_build_deref_cast(b, &counter->def,
+   counter = nir_build_deref_cast(b, &counter->dest.ssa,
                                   nir_var_mem_global,
                                   glsl_uint_type(), 0);
    counter->cast.align_mul = 4;
-   nir_def *offset =
-      nir_deref_atomic(b, 32, &counter->def,
-                       nir_imm_int(b, fmt_str_id_size + args_size),
-                       .atomic_op = nir_atomic_op_iadd);
+   nir_ssa_def *offset =
+      nir_deref_atomic_add(b, 32, &counter->dest.ssa,
+                           nir_imm_int(b, fmt_str_id_size + args_size));
 
    /* Check if we're still in-bounds */
    const unsigned default_buffer_size = 1024 * 1024;
-   unsigned buffer_size = (options && options->max_buffer_size) ? options->max_buffer_size : default_buffer_size;
+   unsigned buffer_size = (options && options->max_buffer_size) ?
+                          options->max_buffer_size : default_buffer_size;
    int max_valid_offset =
       buffer_size - args_size - fmt_str_id_size - counter_size;
-   nir_push_if(b, nir_ilt_imm(b, offset, max_valid_offset));
+   nir_push_if(b, nir_ilt(b, offset, nir_imm_int(b, max_valid_offset)));
 
-   nir_def *printf_succ_val = nir_imm_int(b, 0);
+   nir_ssa_def *printf_succ_val = nir_imm_int(b, 0);
 
    /* Write the format string ID */
-   nir_def *fmt_str_id_offset =
+   nir_ssa_def *fmt_str_id_offset =
       nir_i2iN(b, offset, ptr_bit_size);
    nir_deref_instr *fmt_str_id_deref =
       nir_build_deref_array(b, buffer, fmt_str_id_offset);
-   fmt_str_id_deref = nir_build_deref_cast(b, &fmt_str_id_deref->def,
+   fmt_str_id_deref = nir_build_deref_cast(b, &fmt_str_id_deref->dest.ssa,
                                            nir_var_mem_global,
                                            glsl_uint_type(), 0);
    fmt_str_id_deref->cast.align_mul = 4;
@@ -98,16 +94,29 @@ lower_printf_intrin(nir_builder *b, nir_intrinsic_instr *prntf, void *_options)
    /* Write the format args */
    for (unsigned i = 0; i < glsl_get_length(args->type); ++i) {
       nir_deref_instr *arg_deref = nir_build_deref_struct(b, args, i);
-      nir_def *arg = nir_load_deref(b, arg_deref);
+      nir_ssa_def *arg = nir_load_deref(b, arg_deref);
       const struct glsl_type *arg_type = arg_deref->type;
 
+      /* Clang does promotion of arguments to their "native" size. That means
+       * that any floats have been converted to doubles for the call to
+       * printf. Since doubles are optional, some drivers might not support
+       * them. For those drivers, convert them back to float before writing.
+       * Copy prop and other optimizations should remove all hints of doubles.
+       */
+      if (glsl_get_base_type(arg_type) == GLSL_TYPE_DOUBLE &&
+          options && options->treat_doubles_as_floats) {
+         arg = nir_f2f32(b, arg);
+         arg_type = glsl_float_type();
+      }
+
       unsigned field_offset = glsl_get_struct_field_offset(args->type, i);
-      nir_def *arg_offset =
-         nir_i2iN(b, nir_iadd_imm(b, offset, fmt_str_id_size + field_offset),
-                  ptr_bit_size);
+      nir_ssa_def *arg_offset =
+         nir_i2iN(b, nir_iadd_imm(b, offset,
+                                 fmt_str_id_size + field_offset),
+                 ptr_bit_size);
       nir_deref_instr *dst_arg_deref =
          nir_build_deref_array(b, buffer, arg_offset);
-      dst_arg_deref = nir_build_deref_cast(b, &dst_arg_deref->def,
+      dst_arg_deref = nir_build_deref_cast(b, &dst_arg_deref->dest.ssa,
                                            nir_var_mem_global, arg_type, 0);
       assert(field_offset % 4 == 0);
       dst_arg_deref->cast.align_mul = 4;
@@ -115,11 +124,12 @@ lower_printf_intrin(nir_builder *b, nir_intrinsic_instr *prntf, void *_options)
    }
 
    nir_push_else(b, NULL);
-   nir_def *printf_fail_val = nir_imm_int(b, -1);
+   nir_ssa_def *printf_fail_val = nir_imm_int(b, -1);
    nir_pop_if(b, NULL);
 
-   nir_def *ret_val = nir_if_phi(b, printf_succ_val, printf_fail_val);
-   nir_def_replace(&prntf->def, ret_val);
+   nir_ssa_def *ret_val = nir_if_phi(b, printf_succ_val, printf_fail_val);
+   nir_ssa_def_rewrite_uses(&prntf->dest.ssa, ret_val);
+   nir_instr_remove(&prntf->instr);
 
    return true;
 }
@@ -127,100 +137,7 @@ lower_printf_intrin(nir_builder *b, nir_intrinsic_instr *prntf, void *_options)
 bool
 nir_lower_printf(nir_shader *nir, const nir_lower_printf_options *options)
 {
-   return nir_shader_intrinsics_pass(nir, lower_printf_intrin,
-                                     nir_metadata_none,
-                                     (void *)options);
-}
-
-void
-nir_printf_fmt(nir_builder *b,
-               bool use_printf_base_identifier,
-               unsigned ptr_bit_size,
-               const char *fmt, ...)
-{
-   b->shader->printf_info_count++;
-   b->shader->printf_info = reralloc(b->shader,
-                                     b->shader->printf_info,
-                                     u_printf_info,
-                                     b->shader->printf_info_count);
-
-   u_printf_info *info =
-      &b->shader->printf_info[b->shader->printf_info_count - 1];
-
-   *info = (u_printf_info) {
-      .strings = ralloc_strdup(b->shader, fmt),
-      .string_size = strlen(fmt) + 1,
-   };
-
-   va_list ap;
-   size_t pos = 0;
-   size_t args_size = 0;
-
-   va_start(ap, fmt);
-   while ((pos = util_printf_next_spec_pos(fmt, pos)) != -1) {
-      unsigned arg_size;
-      switch (fmt[pos]) {
-      case 'c': arg_size = 1; break;
-      case 'd': arg_size = 4; break;
-      case 'e': arg_size = 4; break;
-      case 'E': arg_size = 4; break;
-      case 'f': arg_size = 4; break;
-      case 'F': arg_size = 4; break;
-      case 'G': arg_size = 4; break;
-      case 'a': arg_size = 4; break;
-      case 'A': arg_size = 4; break;
-      case 'i': arg_size = 4; break;
-      case 'u': arg_size = 4; break;
-      case 'x': arg_size = 4; break;
-      case 'X': arg_size = 4; break;
-      case 'p': arg_size = 8; break;
-      default:  unreachable("invalid");
-      }
-
-      ASSERTED nir_def *def = va_arg(ap, nir_def*);
-      assert(def->bit_size / 8 == arg_size);
-
-      info->num_args++;
-      info->arg_sizes = reralloc(b->shader,
-                                 info->arg_sizes,
-                                 unsigned, info->num_args);
-      info->arg_sizes[info->num_args - 1] = arg_size;
-
-      args_size += arg_size;
-   }
-   va_end(ap);
-
-   nir_def *buffer_addr =
-      nir_load_printf_buffer_address(
-         b, ptr_bit_size ? ptr_bit_size : nir_get_ptr_bitsize(b->shader));
-   nir_def *buffer_offset =
-      nir_global_atomic(b, 32, buffer_addr,
-                        nir_imm_int(b, args_size + sizeof(uint32_t)),
-                        .atomic_op = nir_atomic_op_iadd);
-
-   /* Identifier */
-   nir_def *identifier =
-      use_printf_base_identifier ?
-      nir_iadd_imm(b,
-                   nir_load_printf_base_identifier(b),
-                   b->shader->printf_info_count) :
-      nir_imm_int(b, b->shader->printf_info_count);
-
-   nir_def *store_addr =
-      nir_iadd(b, buffer_addr, nir_i2iN(b, buffer_offset,
-                                           buffer_addr->bit_size));
-   nir_store_global(b, store_addr, 4, identifier, 0x1);
-
-   /* Arguments */
-   va_start(ap, fmt);
-   unsigned store_offset = sizeof(uint32_t);
-   for (unsigned a = 0; a < info->num_args; a++) {
-      nir_def *def = va_arg(ap, nir_def*);
-
-      nir_store_global(b, nir_iadd_imm(b, store_addr, store_offset),
-                       4, def, 0x1);
-
-      store_offset += info->arg_sizes[a];
-   }
-   va_end(ap);
+   return nir_shader_instructions_pass(nir, lower_printf_instr,
+                                       nir_metadata_none,
+                                       (void *)options);
 }

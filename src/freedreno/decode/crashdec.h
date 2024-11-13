@@ -1,6 +1,24 @@
 /*
  * Copyright © 2021 Google, Inc.
- * SPDX-License-Identifier: MIT
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 
 #ifndef __CRASHDEC_H__
@@ -36,39 +54,27 @@ extern bool verbose;
 extern struct cffdec_options options;
 
 static inline bool
-have_rem_info(void)
-{
-   return options.info->chip == 6 || options.info->chip == 7;
-}
-
-static inline bool
-is_a7xx(void)
-{
-   return options.info->chip == 7;
-}
-
-static inline bool
 is_a6xx(void)
 {
-   return options.info->chip == 6;
+   return (600 <= options.gpu_id) && (options.gpu_id < 700);
 }
 
 static inline bool
 is_a5xx(void)
 {
-   return options.info->chip == 5;
+   return (500 <= options.gpu_id) && (options.gpu_id < 600);
 }
 
 static inline bool
 is_64b(void)
 {
-   return options.info->chip >= 5;
+   return options.gpu_id >= 500;
 }
 
 static inline bool
 is_gmu_legacy(void)
 {
-   switch (options.dev_id.gpu_id) {
+   switch (options.gpu_id) {
    case 615:
    case 618:
    case 630:

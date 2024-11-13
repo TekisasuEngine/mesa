@@ -1,6 +1,24 @@
 /*
- * Copyright © 2015-2018 Rob Clark <robclark@freedesktop.org>
- * SPDX-License-Identifier: MIT
+ * Copyright (C) 2015-2018 Rob Clark <robclark@freedesktop.org>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  *
  * Authors:
  *    Rob Clark <robclark@freedesktop.org>
@@ -67,7 +85,7 @@ struct ir3_context {
 
    /* For vertex shaders, keep track of the system values sources */
    struct ir3_instruction *vertex_id, *basevertex, *instance_id, *base_instance,
-      *draw_id, *view_index, *is_indexed_draw;
+      *draw_id, *view_index;
 
    /* For fragment shaders: */
    struct ir3_instruction *samp_id, *samp_mask_in;
@@ -89,6 +107,12 @@ struct ir3_context {
 
    unsigned num_arrays;
 
+   /* Tracking for max level of flowcontrol (branchstack) needed
+    * by a5xx+:
+    */
+   unsigned stack, max_stack;
+
+   unsigned loop_id;
    unsigned loop_depth;
 
    /* a common pattern for indirect addressing is to request the
@@ -109,7 +133,6 @@ struct ir3_context {
    struct hash_table_u64 *addr1_ht;
 
    struct hash_table *sel_cond_conversions;
-   struct hash_table *predicate_conversions;
 
    /* last dst array, for indirect we need to insert a var-store.
     */
@@ -180,21 +203,12 @@ struct ir3_context *ir3_context_init(struct ir3_compiler *compiler,
 void ir3_context_free(struct ir3_context *ctx);
 
 struct ir3_instruction **ir3_get_dst_ssa(struct ir3_context *ctx,
-                                         nir_def *dst, unsigned n);
-struct ir3_instruction **ir3_get_def(struct ir3_context *ctx, nir_def *def,
+                                         nir_ssa_def *dst, unsigned n);
+struct ir3_instruction **ir3_get_dst(struct ir3_context *ctx, nir_dest *dst,
                                      unsigned n);
-struct ir3_instruction *const *ir3_get_src_maybe_shared(struct ir3_context *ctx,
-                                                        nir_src *src);
-struct ir3_instruction *const *ir3_get_src_shared(struct ir3_context *ctx,
-                                                  nir_src *src, bool shared);
-
-static inline struct ir3_instruction *const *
-ir3_get_src(struct ir3_context *ctx, nir_src *src)
-{
-   return ir3_get_src_shared(ctx, src, false);
-}
-
-void ir3_put_def(struct ir3_context *ctx, nir_def *def);
+struct ir3_instruction *const *ir3_get_src(struct ir3_context *ctx,
+                                           nir_src *src);
+void ir3_put_dst(struct ir3_context *ctx, nir_dest *dst);
 struct ir3_instruction *ir3_create_collect(struct ir3_block *block,
                                            struct ir3_instruction *const *arr,
                                            unsigned arrsz);
@@ -229,18 +243,14 @@ struct ir3_instruction *ir3_get_addr1(struct ir3_context *ctx,
 struct ir3_instruction *ir3_get_predicate(struct ir3_context *ctx,
                                           struct ir3_instruction *src);
 
-void ir3_declare_array(struct ir3_context *ctx, nir_intrinsic_instr *decl);
-struct ir3_array *ir3_get_array(struct ir3_context *ctx, nir_def *reg);
+void ir3_declare_array(struct ir3_context *ctx, nir_register *reg);
+struct ir3_array *ir3_get_array(struct ir3_context *ctx, nir_register *reg);
 struct ir3_instruction *ir3_create_array_load(struct ir3_context *ctx,
                                               struct ir3_array *arr, int n,
                                               struct ir3_instruction *address);
 void ir3_create_array_store(struct ir3_context *ctx, struct ir3_array *arr,
                             int n, struct ir3_instruction *src,
                             struct ir3_instruction *address);
-void ir3_lower_imm_offset(struct ir3_context *ctx, nir_intrinsic_instr *intr,
-                          nir_src *offset_src, unsigned imm_offset_bits,
-                          struct ir3_instruction **offset,
-                          unsigned *imm_offset);
 
 static inline type_t
 utype_for_size(unsigned bit_size)
@@ -265,9 +275,9 @@ utype_src(nir_src src)
 }
 
 static inline type_t
-utype_def(nir_def *def)
+utype_dst(nir_dest dst)
 {
-   return utype_for_size(def->bit_size);
+   return utype_for_size(nir_dest_bit_size(dst));
 }
 
 /**

@@ -11,7 +11,7 @@
 
 /* Helper to calculate the bucket index of a BO */
 static unsigned
-agx_bucket_index(size_t size)
+agx_bucket_index(unsigned size)
 {
    /* Round down to POT to compute a bucket index */
    unsigned bucket_index = util_logbase2(size);
@@ -24,9 +24,16 @@ agx_bucket_index(size_t size)
 }
 
 static struct list_head *
-agx_bucket(struct agx_device *dev, size_t size)
+agx_bucket(struct agx_device *dev, unsigned size)
 {
    return &dev->bo_cache.buckets[agx_bucket_index(size)];
+}
+
+static bool
+agx_bo_wait(struct agx_bo *bo, int64_t timeout_ns)
+{
+   /* TODO: When we allow parallelism we'll need to implement this for real */
+   return true;
 }
 
 static void
@@ -44,8 +51,8 @@ agx_bo_cache_remove_locked(struct agx_device *dev, struct agx_bo *bo)
  * BO. */
 
 struct agx_bo *
-agx_bo_cache_fetch(struct agx_device *dev, size_t size, size_t align,
-                   uint32_t flags, const bool dontwait)
+agx_bo_cache_fetch(struct agx_device *dev, size_t size, uint32_t flags,
+                   const bool dontwait)
 {
    simple_mtx_lock(&dev->bo_cache.lock);
    struct list_head *bucket = agx_bucket(dev, size);
@@ -56,12 +63,10 @@ agx_bo_cache_fetch(struct agx_device *dev, size_t size, size_t align,
       if (entry->size < size || entry->flags != flags)
          continue;
 
-      /* Do not return more than 2x oversized BOs. */
-      if (entry->size > 2 * size)
-         continue;
-
-      if (align > entry->align)
-         continue;
+      /* If the oldest BO in the cache is busy, likely so is
+       * everything newer, so bail. */
+      if (!agx_bo_wait(entry, dontwait ? 0 : INT64_MAX))
+         break;
 
       /* This one works, use it */
       agx_bo_cache_remove_locked(dev, entry);
@@ -97,8 +102,9 @@ agx_bo_cache_evict_stale_bos(struct agx_device *dev, unsigned tv_sec)
 }
 
 static void
-agx_bo_cache_put_locked(struct agx_device *dev, struct agx_bo *bo)
+agx_bo_cache_put_locked(struct agx_bo *bo)
 {
+   struct agx_device *dev = bo->dev;
    struct list_head *bucket = agx_bucket(dev, bo->size);
    struct timespec time;
 
@@ -117,9 +123,8 @@ agx_bo_cache_put_locked(struct agx_device *dev, struct agx_bo *bo)
       printf("BO cache: %zu KiB (+%zu KiB from %s, hit/miss %" PRIu64
              "/%" PRIu64 ")\n",
              DIV_ROUND_UP(dev->bo_cache.size, 1024),
-             DIV_ROUND_UP(bo->size, 1024), bo->label,
-             p_atomic_read(&dev->bo_cache.hits),
-             p_atomic_read(&dev->bo_cache.misses));
+             DIV_ROUND_UP(bo->size, 1024), bo->label, dev->bo_cache.hits,
+             dev->bo_cache.misses);
    }
 
    /* Update label for debug */
@@ -131,13 +136,15 @@ agx_bo_cache_put_locked(struct agx_device *dev, struct agx_bo *bo)
 
 /* Tries to add a BO to the cache. Returns if it was successful */
 static bool
-agx_bo_cache_put(struct agx_device *dev, struct agx_bo *bo)
+agx_bo_cache_put(struct agx_bo *bo)
 {
+   struct agx_device *dev = bo->dev;
+
    if (bo->flags & AGX_BO_SHARED) {
       return false;
    } else {
       simple_mtx_lock(&dev->bo_cache.lock);
-      agx_bo_cache_put_locked(dev, bo);
+      agx_bo_cache_put_locked(bo);
       simple_mtx_unlock(&dev->bo_cache.lock);
 
       return true;
@@ -169,7 +176,7 @@ agx_bo_reference(struct agx_bo *bo)
 }
 
 void
-agx_bo_unreference(struct agx_device *dev, struct agx_bo *bo)
+agx_bo_unreference(struct agx_bo *bo)
 {
    if (!bo)
       return;
@@ -178,18 +185,18 @@ agx_bo_unreference(struct agx_device *dev, struct agx_bo *bo)
    if (p_atomic_dec_return(&bo->refcnt))
       return;
 
+   struct agx_device *dev = bo->dev;
+
    pthread_mutex_lock(&dev->bo_map_lock);
 
    /* Someone might have imported this BO while we were waiting for the
     * lock, let's make sure it's still not referenced before freeing it.
     */
    if (p_atomic_read(&bo->refcnt) == 0) {
-      assert(!p_atomic_read_relaxed(&bo->writer));
-
       if (dev->debug & AGX_DBG_TRACE)
-         agxdecode_track_free(dev->agxdecode, bo);
+         agxdecode_track_free(bo);
 
-      if (!agx_bo_cache_put(dev, bo))
+      if (!agx_bo_cache_put(bo))
          agx_bo_free(dev, bo);
    }
 
@@ -197,36 +204,35 @@ agx_bo_unreference(struct agx_device *dev, struct agx_bo *bo)
 }
 
 struct agx_bo *
-agx_bo_create(struct agx_device *dev, size_t size, unsigned align,
-              enum agx_bo_flags flags, const char *label)
+agx_bo_create(struct agx_device *dev, unsigned size, enum agx_bo_flags flags,
+              const char *label)
 {
    struct agx_bo *bo;
    assert(size > 0);
 
-   /* BOs are allocated in pages */
-   size = ALIGN_POT(size, (size_t)dev->params.vm_page_size);
-   align = MAX2(align, dev->params.vm_page_size);
+   /* To maximize BO cache usage, don't allocate tiny BOs */
+   size = ALIGN_POT(size, 16384);
 
    /* See if we have a BO already in the cache */
-   bo = agx_bo_cache_fetch(dev, size, align, flags, true);
+   bo = agx_bo_cache_fetch(dev, size, flags, true);
 
    /* Update stats based on the first attempt to fetch */
    if (bo != NULL)
-      p_atomic_inc(&dev->bo_cache.hits);
+      dev->bo_cache.hits++;
    else
-      p_atomic_inc(&dev->bo_cache.misses);
+      dev->bo_cache.misses++;
 
    /* Otherwise, allocate a fresh BO. If allocation fails, we can try waiting
     * for something in the cache. But if there's no nothing suitable, we should
     * flush the cache to make space for the new allocation.
     */
    if (!bo)
-      bo = dev->ops.bo_alloc(dev, size, align, flags);
+      bo = agx_bo_alloc(dev, size, flags);
    if (!bo)
-      bo = agx_bo_cache_fetch(dev, size, align, flags, false);
+      bo = agx_bo_cache_fetch(dev, size, flags, false);
    if (!bo) {
       agx_bo_cache_evict_all(dev);
-      bo = dev->ops.bo_alloc(dev, size, align, flags);
+      bo = agx_bo_alloc(dev, size, flags);
    }
 
    if (!bo) {
@@ -238,7 +244,7 @@ agx_bo_create(struct agx_device *dev, size_t size, unsigned align,
    p_atomic_set(&bo->refcnt, 1);
 
    if (dev->debug & AGX_DBG_TRACE)
-      agxdecode_track_alloc(dev->agxdecode, bo);
+      agxdecode_track_alloc(bo);
 
    return bo;
 }

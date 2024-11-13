@@ -16,6 +16,7 @@ text: |-
     stk:                  11.15s
     0ad:                  10.93s
     counterstrike:         9.87s
+    minetest:              8.24s
     neverball:             8.53s
 
 traces:
@@ -29,7 +30,6 @@ traces:
       checksum: 6aef509acd1257cc56612141e24dc11c
     freedreno-a630:
       checksum: 6aef509acd1257cc56612141e24dc11c
-      label: [skip, flakes]
     zink-a618:
       checksum: 45bdbb33bf87ed114bd548248be13408
       label: [skip, broken]
@@ -47,9 +47,7 @@ traces:
     freedreno-a530:
       checksum: 102a09ce76092436173fd09a6a2bd941
     freedreno-a618:
-      label: [skip, flakes]
       checksum: e0e18dcc50ab2e23cead650d64469178
-      text: "intermittent segfault https://mesa.pages.freedesktop.org/-/mesa/-/jobs/39893593/artifacts/results/summary/results/trace@freedreno-a618@valve@portal-2-v2.trace.html"
     freedreno-a630:
       checksum: e0e18dcc50ab2e23cead650d64469178
     zink-a618:
@@ -79,9 +77,7 @@ traces:
       label: [skip, slow]
       checksum: ade41e6fe932552914c678155149babb
     zink-a630:
-      label: [skip, slow]
       checksum: ade41e6fe932552914c678155149babb
-      text: "intermittent timeouts"
 
   xonotic/xonotic-keybench-high-v2.trace:
     freedreno-a306:
@@ -106,10 +102,10 @@ traces:
       label: [unsupported]
     freedreno-a618:
       label: [skip, flakes]
-      checksum: 17c6a6dd333514b125cc18282ce24ba8
+      checksum: 50d4bd01756ffe70aee5f8401f7a6ce4
       text: https://gitlab.freedesktop.org/mesa/mesa/-/issues/8337
     freedreno-a630:
-      checksum: 17c6a6dd333514b125cc18282ce24ba8
+      checksum: 50d4bd01756ffe70aee5f8401f7a6ce4
     zink-a618:
       label: [skip, flakes]
       checksum: 59e37d2dca80caedd9494114d64c676c
@@ -193,9 +189,9 @@ traces:
     freedreno-a530:
       label: [skip, flakes]
     freedreno-a618:
-      checksum: 1b9a79f0088a3ddb5723f217d37cee74
+      checksum: c8608d54cc6298476a2b60686d152dbc
     freedreno-a630:
-      checksum: 1b9a79f0088a3ddb5723f217d37cee74
+      checksum: c8608d54cc6298476a2b60686d152dbc
     zink-a618:
       checksum: e4e5415f7a81a6bd14b7ff8f67083cbf
     zink-a630:
@@ -213,9 +209,9 @@ traces:
     freedreno-a630:
       checksum: 730692659fbb9eefa44d6b1a2df2fa8e
     zink-a618:
-      checksum: 552e62fabd05ebfbb6d7bdd574b4e1c7
+      checksum: 2a31ee1a56b755dcf5975b31eacbec32
     zink-a630:
-      checksum: 552e62fabd05ebfbb6d7bdd574b4e1c7
+      checksum: 2a31ee1a56b755dcf5975b31eacbec32
 
   behdad-glyphy/glyphy-v2.trace:
     freedreno-a306:
@@ -232,6 +228,54 @@ traces:
       checksum: d25edb433abfcde517b626b3071906ff
     zink-a630:
       checksum: d25edb433abfcde517b626b3071906ff
+
+  minetest/minetest-high-v2.trace:
+    freedreno-a306:
+      label: [crash]
+    freedreno-a530:
+      checksum: 48d4d4776885fd120429cd36a35ddaf2
+    freedreno-a618:
+      checksum: 2aebe86d6c0488b953bfaacd8000c01a
+    freedreno-a630:
+      checksum: 2aebe86d6c0488b953bfaacd8000c01a
+    zink-a618:
+      label: [skip, flakes]
+      checksum: c167b29121b4bbba7675070b2ab1f51a
+    zink-a630:
+      label: [skip, flakes]
+      checksum: c167b29121b4bbba7675070b2ab1f51a
+
+  minetest/minetest-v2.trace:
+    freedreno-a306:
+      checksum: 37081a69137df415cfda13dac62966c4
+    freedreno-a530:
+      checksum: 824672b1eef72c0223ac754dfc46e2d5
+    freedreno-a618:
+      checksum: 5c0c5da476775dfac94b79e7edb556ce
+    freedreno-a630:
+      checksum: 5c0c5da476775dfac94b79e7edb556ce
+    zink-a618:
+      checksum: a8dea3dcb341c0f6c786a264dee51766
+    zink-a630:
+      label: [skip, flakes]
+      checksum: a8dea3dcb341c0f6c786a264dee51766
+      text: occasional Different pixels 1 (no tolerance), 0 (1% tol.)
+
+  filament/filament-default.trace:
+    freedreno-a306:
+      label: [unsupported]
+    freedreno-a530:
+      label: [unsupported]
+    freedreno-a618:
+      label: [skip, flakes]
+    freedreno-a630:
+      label: [skip, flakes]
+      checksum: c45e17d98a5d598bef50494f1150f5b9
+      text: helmet texture sometimes missing
+    zink-a618:
+      checksum: 59e18960d8b73a93401b793b28e99f42
+    zink-a630:
+      checksum: 59e18960d8b73a93401b793b28e99f42
 
   glxgears/glxgears-2-v2.trace:
     freedreno-a306:
@@ -256,32 +300,31 @@ traces:
       checksum: 751e0e784ba2f003cfc456fe8699f1fa
       label: [hang]
     freedreno-a530:
-      checksum: 88188447495b819e5814368486deb0a0
+      checksum: ba53d1ffbe911171546a93259fb2e57c
     freedreno-a618:
-      checksum: eb810bd258c06f873a2d9718c5209c6d
+      checksum: 313ef615f0f5a11eeaf95a2a87769a32
     freedreno-a630:
-      checksum: eb810bd258c06f873a2d9718c5209c6d
+      checksum: 313ef615f0f5a11eeaf95a2a87769a32
     zink-a618:
-      checksum: eefcef0b1167c1140c298f3908c31195
+      checksum: fe317b1f69f9a2f3e20bf51f63753d2a
     zink-a630:
       checksum: fe317b1f69f9a2f3e20bf51f63753d2a
 
-# gimark requires an environment var to work around a bug, disable for now
-#  gputest/gimark-v2.trace:
-#    freedreno-a306:
-#      label: [unsupported]
-#      text: requires GL 3.3
-#    freedreno-a530:
-#      label: [unsupported]
-#      text: requires GL 3.3
-#    freedreno-a618:
-#      checksum: e58167bd8eeb8952facbc00ff0449135
-#    freedreno-a630:
-#      checksum: e58167bd8eeb8952facbc00ff0449135
-#    zink-a618:
-#      checksum: e58167bd8eeb8952facbc00ff0449135
-#    zink-a630:
-#      checksum: e58167bd8eeb8952facbc00ff0449135
+  gputest/gimark-v2.trace:
+    freedreno-a306:
+      label: [unsupported]
+      text: requires GL 3.3
+    freedreno-a530:
+      label: [unsupported]
+      text: requires GL 3.3
+    freedreno-a618:
+      checksum: e58167bd8eeb8952facbc00ff0449135
+    freedreno-a630:
+      checksum: e58167bd8eeb8952facbc00ff0449135
+    zink-a618:
+      checksum: e58167bd8eeb8952facbc00ff0449135
+    zink-a630:
+      checksum: e58167bd8eeb8952facbc00ff0449135
 
   gputest/pixmark-julia-fp32-v2.trace:
     freedreno-a306:
@@ -323,6 +366,25 @@ traces:
       checksum: 2a99e051c8a0126f2283e6b9bbb2fb40
       text: 'Unsupported SPIR-V capability: SpvCapabilityInt64 (11)'
 
+  gputest/pixmark-piano-v2.trace:
+    freedreno-a306:
+      label: [skip]
+      text: missing 3/4 of rendered image
+      checksum: e7f01e62180b60aef8c67fc4977c90d1
+    freedreno-a530:
+      checksum: 71f46ff29ab058f89c745ddede5cc907
+    freedreno-a618:
+      label: [skip]
+    freedreno-a630:
+      label: [skip]
+      text: |-
+        One of the material textures appears brighter on freedreno than
+        i965 in a way that is probably wrong.
+    zink-a618:
+      checksum: 227516d3818969c68a1864aa942119c2
+    zink-a630:
+      checksum: 227516d3818969c68a1864aa942119c2
+
   gputest/pixmark-volplosion-v2.trace:
     freedreno-a306:
       label: [hang]
@@ -334,9 +396,9 @@ traces:
     freedreno-a630:
       checksum: e4da2cf366cb68833569105d37aaa50d
     zink-a618:
-      checksum: e4da2cf366cb68833569105d37aaa50d
+      checksum: dbd6130eeae3eb6d5df73f3069beae28
     zink-a630:
-      checksum: e4da2cf366cb68833569105d37aaa50d
+      checksum: dbd6130eeae3eb6d5df73f3069beae28
 
   gputest/plot3d-v2.trace:
     freedreno-a306:
@@ -359,11 +421,11 @@ traces:
       label: [unsupported]
       text: Requires GL4 for tess.
     freedreno-a618:
-      checksum: 92312303aa8279214f0a300a625efa87
+      checksum: af356a98c4d55fb10613a11fbe687adb
     freedreno-a630:
-      checksum: 92312303aa8279214f0a300a625efa87
+      checksum: af356a98c4d55fb10613a11fbe687adb
     zink-a618:
-      checksum: 92312303aa8279214f0a300a625efa87
+      checksum: af356a98c4d55fb10613a11fbe687adb
     zink-a630:
       checksum: af356a98c4d55fb10613a11fbe687adb
 
@@ -607,9 +669,7 @@ traces:
     zink-a618:
       checksum: 8533a3fd4dca0c68df6721f7eab75960
     zink-a630:
-      label: [skip, flakes]
       checksum: 8533a3fd4dca0c68df6721f7eab75960
-      text: "intermittent gpu fault ring 0 fence 4b1 status 00C40085 rb 004b/004b ib1 000000012240C000/485c ib2 0000000121A3C270/0037"
 
   nheko/nheko-colors.trace:
     freedreno-a306:
@@ -621,7 +681,7 @@ traces:
     freedreno-a630:
       label: [skip]
     zink-a618:
-      label: [skip, flakes, no-perf]
+      label: [no-perf]
       checksum: fd1b9033e68c394a5564d8c4819a3012
       text: >
         Zink assertion error:
@@ -630,7 +690,7 @@ traces:
           apitrace: warning: caught signal 6
           28177: error: caught an unhandled exception
     zink-a630:
-      label: [skip, flakes, no-perf]
+      label: [skip, flakes]
       checksum: fd1b9033e68c394a5564d8c4819a3012
       text: crashes time to time
 
@@ -670,17 +730,35 @@ traces:
       label: [skip, flakes]
       text: Inconsistent rendering, but looks good.
 
+  freedoom/freedoom-phase2-gl-high.trace:
+    freedreno-a306:
+      label: [unsupported]
+    freedreno-a530:
+      label: [unsupported]
+      text: needs GL 4.6
+    freedreno-a618:
+      checksum: a2dbcd27c404a1bb0f7d60476d93d22c
+    freedreno-a630:
+      checksum: a2dbcd27c404a1bb0f7d60476d93d22c
+    zink-a618:
+      label: [crash]
+      text: |-
+        ../src/gallium/drivers/zink/zink_context.c:541: update_descriptor_state_ubo:
+        Assertion `ctx->di.ubos[shader][slot].range <= screen->info.props.limits.maxUniformBufferRange' failed.
+    zink-a630:
+      label: [crash]
+      text: |-
+        ../src/gallium/drivers/zink/zink_context.c:541: update_descriptor_state_ubo:
+        Assertion `ctx->di.ubos[shader][slot].range <= screen->info.props.limits.maxUniformBufferRange' failed.
+
   unvanquished/unvanquished-lowest.trace:
     freedreno-a306:
       label: [skip]
     freedreno-a530:
       label: [skip]
     freedreno-a618:
-      label: [skip, flakes]
-      text: text is prone to occasional misrendering, particularly in the lower left
       checksum: ae37867b1a9a94d2be9ff6c7e2009813
     freedreno-a630:
-      label: [skip, flakes]
       checksum: ae37867b1a9a94d2be9ff6c7e2009813
     zink-a618:
       checksum: ae37867b1a9a94d2be9ff6c7e2009813
@@ -697,14 +775,11 @@ traces:
     freedreno-a618:
       checksum: a71d1ad391162acef60cbb2804d0cf64
     freedreno-a630:
-      label: [skip, flakes]
       checksum: a71d1ad391162acef60cbb2804d0cf64
     zink-a618:
-      checksum: b487c2784d458dff4a12f65e5cc46ac1
+      checksum: 7d084f2cd05644b717cc591bd8e9dcce
     zink-a630:
-      label: [skip, flakes]
-      checksum: b487c2784d458dff4a12f65e5cc46ac1
-      text: "intermittent gpu fault ring 0 fence 4b4 status 00CE0185 rb 0067/0067 ib1 000000010C498000/14d14 ib2 0000000000000000/0000"
+      checksum: 7d084f2cd05644b717cc591bd8e9dcce
 
   warzone2100/warzone2100-default.trace:
     freedreno-a306:

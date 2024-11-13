@@ -2,7 +2,24 @@
 ************************************************************************************************************************
 *
 *  Copyright (C) 2007-2022 Advanced Micro Devices, Inc.  All rights reserved.
-*  SPDX-License-Identifier: MIT
+*
+* Permission is hereby granted, free of charge, to any person obtaining a
+* copy of this software and associated documentation files (the "Software"),
+* to deal in the Software without restriction, including without limitation
+* the rights to use, copy, modify, merge, publish, distribute, sublicense,
+* and/or sell copies of the Software, and to permit persons to whom the
+* Software is furnished to do so, subject to the following conditions:
+*
+* The above copyright notice and this permission notice shall be included in
+* all copies or substantial portions of the Software.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+* THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
+* OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+* ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+* OTHER DEALINGS IN THE SOFTWARE
 *
 ***********************************************************************************************************************/
 
@@ -34,7 +51,7 @@ struct Gfx11ChipSettings
 {
     struct
     {
-        UINT_32 isGfx1150           :  1;
+        UINT_32 reserved0           :  1;
         UINT_32 isGfx1103           :  1;
         UINT_32 reserved1           : 30;
 
@@ -121,11 +138,12 @@ const UINT_32 Gfx11Rsrc2dSwModeMask = Gfx11LinearSwModeMask  |
                                       Gfx11ZSwModeMask       |
                                       Gfx11RenderSwModeMask;
 
-const UINT_32 Gfx11Rsrc3dSwModeMask = Gfx11LinearSwModeMask   |
-                                      Gfx11StandardSwModeMask |
-                                      Gfx11ZSwModeMask        |
-                                      Gfx11RenderSwModeMask   |
-                                      (1u << ADDR_SW_64KB_D_X);
+const UINT_32 Gfx11Rsrc3dSwModeMask = Gfx11LinearSwModeMask    |
+                                      Gfx11StandardSwModeMask  |
+                                      Gfx11ZSwModeMask         |
+                                      Gfx11RenderSwModeMask    |
+                                      (1u << ADDR_SW_64KB_D_X) |
+                                      (1u << ADDR_SW_256KB_D_X);
 
 const UINT_32 Gfx11Rsrc2dPrtSwModeMask =
     (Gfx11Blk4KBSwModeMask | Gfx11Blk64KBSwModeMask) & ~Gfx11XSwModeMask & Gfx11Rsrc2dSwModeMask;
@@ -140,8 +158,6 @@ const UINT_32 Gfx11Rsrc3dThin256KBSwModeMask = (1u << ADDR_SW_256KB_Z_X) |
                                                (1u << ADDR_SW_256KB_R_X);
 
 const UINT_32 Gfx11Rsrc3dThinSwModeMask = Gfx11Rsrc3dThin64KBSwModeMask | Gfx11Rsrc3dThin256KBSwModeMask;
-
-const UINT_32 Gfx11Rsrc3dViewAs2dSwModeMask = Gfx11Rsrc3dThinSwModeMask | Gfx11LinearSwModeMask;
 
 const UINT_32 Gfx11Rsrc3dThickSwModeMask = Gfx11Rsrc3dSwModeMask & ~(Gfx11Rsrc3dThinSwModeMask | Gfx11LinearSwModeMask);
 

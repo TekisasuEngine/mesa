@@ -1497,7 +1497,7 @@ glcpp_parser_create(struct gl_context *gl_ctx,
    glcpp_lex_init_extra (parser, &parser->scanner);
    parser->defines = _mesa_hash_table_create(NULL, _mesa_hash_string,
                                              _mesa_key_string_equal);
-   parser->linalloc = linear_context(parser);
+   parser->linalloc = linear_alloc_parent(parser, 0);
    parser->active = NULL;
    parser->lexing_directive = 0;
    parser->lexing_version_directive = 0;
@@ -1864,19 +1864,23 @@ _glcpp_parser_apply_pastes(glcpp_parser_t *parser, token_list_t *list)
  */
 static token_list_t *
 _glcpp_parser_expand_function(glcpp_parser_t *parser, token_node_t *node,
-                              token_node_t **last, expansion_mode_t mode,
-                              macro_t *macro)
+                              token_node_t **last, expansion_mode_t mode)
 {
+   struct hash_entry *entry;
+   macro_t *macro;
    const char *identifier;
    argument_list_t *arguments;
    function_status_t status;
    token_list_t *substituted;
    int parameter_index;
 
-   assert(macro);
+   identifier = node->token->value.str;
+
+   entry = _mesa_hash_table_search(parser->defines, identifier);
+   macro = entry ? entry->data : NULL;
+
    assert(macro->is_function);
 
-   identifier = node->token->value.str;
    arguments = _argument_list_create(parser);
    status = _arguments_parse(parser, arguments, node, last);
 
@@ -2049,7 +2053,7 @@ _glcpp_parser_expand_node(glcpp_parser_t *parser, token_node_t *node,
       return replacement;
    }
 
-   return _glcpp_parser_expand_function(parser, node, last, mode, macro);
+   return _glcpp_parser_expand_function(parser, node, last, mode);
 }
 
 /* Push a new identifier onto the parser's active list.

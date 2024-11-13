@@ -27,21 +27,26 @@
 #include "vk_common_entrypoints.h"
 
 static nir_shader *
-get_set_event_cs(const nir_shader_compiler_options *options)
+get_set_event_cs()
 {
+   const nir_shader_compiler_options *options = v3dv_pipeline_get_nir_options();
    nir_builder b = nir_builder_init_simple_shader(MESA_SHADER_COMPUTE, options,
                                                   "set event cs");
 
-   nir_def *buf =
+   b.shader->info.workgroup_size[0] = 1;
+   b.shader->info.workgroup_size[1] = 1;
+   b.shader->info.workgroup_size[2] = 1;
+
+   nir_ssa_def *buf =
       nir_vulkan_resource_index(&b, 2, 32, nir_imm_int(&b, 0),
                                 .desc_set = 0,
                                 .binding = 0,
                                 .desc_type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
-   nir_def *offset =
+   nir_ssa_def *offset =
       nir_load_push_constant(&b, 1, 32, nir_imm_int(&b, 0), .base = 0, .range = 4);
 
-   nir_def *value =
+   nir_ssa_def *value =
       nir_load_push_constant(&b, 1, 8, nir_imm_int(&b, 0), .base = 4, .range = 4);
 
    nir_store_ssbo(&b, value, buf, offset,
@@ -51,24 +56,29 @@ get_set_event_cs(const nir_shader_compiler_options *options)
 }
 
 static nir_shader *
-get_wait_event_cs(const nir_shader_compiler_options *options)
+get_wait_event_cs()
 {
+   const nir_shader_compiler_options *options = v3dv_pipeline_get_nir_options();
    nir_builder b = nir_builder_init_simple_shader(MESA_SHADER_COMPUTE, options,
                                                   "wait event cs");
 
-   nir_def *buf =
+   b.shader->info.workgroup_size[0] = 1;
+   b.shader->info.workgroup_size[1] = 1;
+   b.shader->info.workgroup_size[2] = 1;
+
+   nir_ssa_def *buf =
       nir_vulkan_resource_index(&b, 2, 32, nir_imm_int(&b, 0),
                                 .desc_set = 0,
                                 .binding = 0,
                                 .desc_type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
-   nir_def *offset =
+   nir_ssa_def *offset =
       nir_load_push_constant(&b, 1, 32, nir_imm_int(&b, 0), .base = 0, .range = 4);
 
    nir_loop *loop = nir_push_loop(&b);
-      nir_def *load =
+      nir_ssa_def *load =
          nir_load_ssbo(&b, 1, 8, buf, offset, .access = 0, .align_mul = 4);
-      nir_def *value = nir_i2i32(&b, load);
+      nir_ssa_def *value = nir_i2i32(&b, load);
 
       nir_if *if_stmt = nir_push_if(&b, nir_ieq_imm(&b, value, 1));
       nir_jump(&b, nir_jump_break);
@@ -135,11 +145,8 @@ create_event_pipelines(struct v3dv_device *device)
 
    VkPipeline pipeline;
 
-   const nir_shader_compiler_options *options =
-      v3dv_pipeline_get_nir_options(&device->devinfo);
-
    if (!device->events.set_event_pipeline) {
-      nir_shader *set_event_cs_nir = get_set_event_cs(options);
+      nir_shader *set_event_cs_nir = get_set_event_cs();
       result = v3dv_create_compute_pipeline_from_nir(device,
                                                      set_event_cs_nir,
                                                      device->events.pipeline_layout,
@@ -152,7 +159,7 @@ create_event_pipelines(struct v3dv_device *device)
    }
 
    if (!device->events.wait_event_pipeline) {
-      nir_shader *wait_event_cs_nir = get_wait_event_cs(options);
+      nir_shader *wait_event_cs_nir = get_wait_event_cs();
       result = v3dv_create_compute_pipeline_from_nir(device,
                                                      wait_event_cs_nir,
                                                      device->events.pipeline_layout,
@@ -451,8 +458,6 @@ v3dv_GetEventStatus(VkDevice _device, VkEvent _event)
 {
    V3DV_FROM_HANDLE(v3dv_device, device, _device);
    V3DV_FROM_HANDLE(v3dv_event, event, _event);
-   if (vk_device_is_lost(&device->vk))
-      return VK_ERROR_DEVICE_LOST;
    return event_get_value(device, event) ? VK_EVENT_SET : VK_EVENT_RESET;
 }
 

@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#pragma once
+#ifndef __AGX_IO_H
+#define __AGX_IO_H
 
 #include <stdbool.h>
 #include "agx_bo.h"
@@ -125,12 +126,12 @@ struct agx_create_notification_queue_resp {
    uint32_t unk3; // 0
 } __attribute__((packed));
 
-struct IOAccelCommandQueueSubmitArgs_Header {
+struct agx_submit_cmdbuf_req {
+   /* IOAccelCommandQueueSubmitArgs_Header */
    uint32_t unk0;
    uint32_t count;
-};
 
-struct IOAccelCommandQueueSubmitArgs_Command {
+   /* IOAccelCommandQueueSubmitArgs_Command */
    uint32_t command_buffer_shmem_id;
    uint32_t segment_list_shmem_id;
    uint64_t unk1B; // 0, new in 12.x
@@ -271,3 +272,5 @@ struct agx_map_entry {
 } __attribute__((packed));
 
 uint64_t agx_get_global_id(struct agx_device *dev);
+
+#endif

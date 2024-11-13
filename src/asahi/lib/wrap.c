@@ -13,10 +13,10 @@
 #include <mach/mach.h>
 
 #include "util/compiler.h"
-#include "util/u_hexdump.h"
 #include "agx_iokit.h"
 #include "decode.h"
 #include "dyld_interpose.h"
+#include "hexdump.h"
 #include "util.h"
 
 /*
@@ -110,22 +110,19 @@ wrap_Method(mach_port_t connection, uint32_t selector, const uint64_t *input,
 
    case AGX_SELECTOR_SUBMIT_COMMAND_BUFFERS:
       assert(output == NULL && outputStruct == NULL);
+      assert(inputStructCnt == sizeof(struct agx_submit_cmdbuf_req));
       assert(inputCnt == 1);
 
       printf("%X: SUBMIT_COMMAND_BUFFERS command queue id:%llx %p\n",
              connection, input[0], inputStruct);
 
-      const struct IOAccelCommandQueueSubmitArgs_Header *hdr = inputStruct;
-      const struct IOAccelCommandQueueSubmitArgs_Command *cmds =
-         (void *)(hdr + 1);
+      const struct agx_submit_cmdbuf_req *req = inputStruct;
 
-      for (unsigned i = 0; i < hdr->count; ++i) {
-         const struct IOAccelCommandQueueSubmitArgs_Command *req = &cmds[i];
-         agxdecode_cmdstream(req->command_buffer_shmem_id,
-                             req->segment_list_shmem_id, true);
-         if (getenv("ASAHI_DUMP"))
-            agxdecode_dump_mappings(req->segment_list_shmem_id);
-      }
+      agxdecode_cmdstream(req->command_buffer_shmem_id,
+                          req->segment_list_shmem_id, true);
+
+      if (getenv("ASAHI_DUMP"))
+         agxdecode_dump_mappings(req->segment_list_shmem_id);
 
       agxdecode_next_frame();
       FALLTHROUGH;
@@ -140,7 +137,7 @@ wrap_Method(mach_port_t connection, uint32_t selector, const uint64_t *input,
 
       if (inputStructCnt) {
          printf(", struct:\n");
-         u_hexdump(stdout, inputStruct, inputStructCnt, true);
+         hexdump(stdout, inputStruct, inputStructCnt, true);
       } else {
          printf("\n");
       }
@@ -171,14 +168,12 @@ wrap_Method(mach_port_t connection, uint32_t selector, const uint64_t *input,
 
       uint64_t *ptr = (uint64_t *)outputStruct;
       uint32_t *words = (uint32_t *)(ptr + 1);
-      bool mmap = inp[1];
 
-      /* Construct a synthetic GEM handle for the shmem */
       agxdecode_track_alloc(&(struct agx_bo){
-         .handle = words[1] ^ (mmap ? (1u << 30) : (1u << 29)),
+         .handle = words[1],
          .ptr.cpu = (void *)*ptr,
          .size = words[0],
-      });
+         .type = inp[1] ? AGX_ALLOC_CMDBUF : AGX_ALLOC_MEMMAP});
 
       break;
    }
@@ -211,6 +206,7 @@ wrap_Method(mach_port_t connection, uint32_t selector, const uint64_t *input,
          assert(resp->sub_size == resp->root_size);
 
       agxdecode_track_alloc(&(struct agx_bo){
+         .type = AGX_ALLOC_REGULAR,
          .size = resp->sub_size,
          .handle = resp->handle,
          .ptr.gpu = resp->gpu_va,
@@ -226,18 +222,8 @@ wrap_Method(mach_port_t connection, uint32_t selector, const uint64_t *input,
       assert(output == NULL);
       assert(outputStruct == NULL);
 
-      agxdecode_track_free(&(struct agx_bo){.handle = input[0]});
-
-      break;
-   }
-
-   case AGX_SELECTOR_FREE_SHMEM: {
-      assert(inputCnt == 1);
-      assert(inputStruct == NULL);
-      assert(output == NULL);
-      assert(outputStruct == NULL);
-
-      agxdecode_track_free(&(struct agx_bo){.handle = input[0] ^ (1u << 29)});
+      agxdecode_track_free(
+         &(struct agx_bo){.type = AGX_ALLOC_REGULAR, .handle = input[0]});
 
       break;
    }
@@ -255,12 +241,12 @@ wrap_Method(mach_port_t connection, uint32_t selector, const uint64_t *input,
 
       if (outputStructCntP) {
          printf(" struct\n");
-         u_hexdump(stdout, outputStruct, *outputStructCntP, true);
+         hexdump(stdout, outputStruct, *outputStructCntP, true);
 
          if (selector == 2) {
             /* Dump linked buffer as well */
             void **o = outputStruct;
-            u_hexdump(stdout, *o, 64, true);
+            hexdump(stdout, *o, 64, true);
          }
       }
 
@@ -293,7 +279,7 @@ wrap_AsyncMethod(mach_port_t connection, uint32_t selector,
 
    if (inputStructCnt) {
       printf(", struct:\n");
-      u_hexdump(stdout, inputStruct, inputStructCnt, true);
+      hexdump(stdout, inputStruct, inputStructCnt, true);
    } else {
       printf("\n");
    }
@@ -321,12 +307,12 @@ wrap_AsyncMethod(mach_port_t connection, uint32_t selector,
 
    if (outputStructCntP) {
       printf(" struct\n");
-      u_hexdump(stdout, outputStruct, *outputStructCntP, true);
+      hexdump(stdout, outputStruct, *outputStructCntP, true);
 
       if (selector == 2) {
          /* Dump linked buffer as well */
          void **o = outputStruct;
-         u_hexdump(stdout, *o, 64, true);
+         hexdump(stdout, *o, 64, true);
       }
    }
 

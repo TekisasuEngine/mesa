@@ -25,7 +25,7 @@
  *
  **************************************************************************/
 
-#include "util/compiler.h"
+#include "pipe/p_compiler.h"
 
 #include "postprocess/filters.h"
 #include "postprocess/pp_private.h"
@@ -253,7 +253,7 @@ pp_debug(const char *fmt, ...)
 {
    va_list ap;
 
-   if (!debug_get_bool_option("PP_DEBUG", false))
+   if (!debug_get_bool_option("PP_DEBUG", FALSE))
       return;
 
    va_start(ap, fmt);

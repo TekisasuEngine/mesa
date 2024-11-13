@@ -64,8 +64,19 @@ lower_instr(nir_builder *b, nir_instr *instr, void *cb_data)
    nir_variable *var;
 
    switch (intrinsic->intrinsic) {
-   case nir_intrinsic_image_deref_atomic:
-   case nir_intrinsic_image_deref_atomic_swap:
+   case nir_intrinsic_image_deref_atomic_add:
+   case nir_intrinsic_image_deref_atomic_imin:
+   case nir_intrinsic_image_deref_atomic_umin:
+   case nir_intrinsic_image_deref_atomic_imax:
+   case nir_intrinsic_image_deref_atomic_umax:
+   case nir_intrinsic_image_deref_atomic_and:
+   case nir_intrinsic_image_deref_atomic_or:
+   case nir_intrinsic_image_deref_atomic_xor:
+   case nir_intrinsic_image_deref_atomic_exchange:
+   case nir_intrinsic_image_deref_atomic_comp_swap:
+   case nir_intrinsic_image_deref_atomic_fadd:
+   case nir_intrinsic_image_deref_atomic_inc_wrap:
+   case nir_intrinsic_image_deref_atomic_dec_wrap:
    case nir_intrinsic_image_deref_load:
    case nir_intrinsic_image_deref_samples:
    case nir_intrinsic_image_deref_size:
@@ -86,7 +97,7 @@ lower_instr(nir_builder *b, nir_instr *instr, void *cb_data)
 
    b->cursor = nir_before_instr(instr);
 
-   nir_def *src;
+   nir_ssa_def *src;
    int range_base = 0;
    if (bindless) {
       src = nir_load_deref(b, deref);
@@ -109,6 +120,7 @@ bool
 gl_nir_lower_images(nir_shader *shader, bool bindless_only)
 {
    return nir_shader_instructions_pass(shader, lower_instr,
-                                       nir_metadata_control_flow,
+                                       nir_metadata_block_index |
+                                       nir_metadata_dominance,
                                        &bindless_only);
 }

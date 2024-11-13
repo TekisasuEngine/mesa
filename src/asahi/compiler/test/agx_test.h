@@ -20,7 +20,6 @@ agx_test_builder(void *memctx)
 
    agx_block *blk = rzalloc(ctx, agx_block);
    util_dynarray_init(&blk->predecessors, NULL);
-   ctx->num_blocks = 1;
 
    list_addtail(&blk->link, &ctx->blocks);
    list_inithead(&blk->instructions);
@@ -30,20 +29,6 @@ agx_test_builder(void *memctx)
    b->cursor = agx_after_block(blk);
 
    return b;
-}
-
-static inline agx_block *
-agx_test_block(agx_context *ctx)
-{
-   agx_block *blk = rzalloc(ctx, agx_block);
-
-   util_dynarray_init(&blk->predecessors, blk);
-   list_addtail(&blk->link, &ctx->blocks);
-   list_inithead(&blk->instructions);
-
-   blk->index = ctx->num_blocks++;
-
-   return blk;
 }
 
 /* Helper to compare for logical equality of instructions. Need to compare the
@@ -77,7 +62,8 @@ agx_block_equal(agx_block *A, agx_block *B)
       return false;
 
    list_pair_for_each_entry(agx_instr, insA, insB, &A->instructions,
-                            &B->instructions, link) {
+                            &B->instructions, link)
+   {
       if (!agx_instr_equal(insA, insB))
          return false;
    }
@@ -92,7 +78,8 @@ agx_shader_equal(agx_context *A, agx_context *B)
       return false;
 
    list_pair_for_each_entry(agx_block, blockA, blockB, &A->blocks, &B->blocks,
-                            link) {
+                            link)
+   {
       if (!agx_block_equal(blockA, blockB))
          return false;
    }

@@ -1,20 +1,36 @@
 # Copyright © 2017-2019 Intel Corporation
-# SPDX-License-Identifier: MIT
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 
 inc_egl = include_directories('.', 'main')
 inc_egl_dri2 = include_directories('drivers/dri2')
 
 c_args_for_egl = [asan_c_args]
 cpp_args_for_egl = []
-link_for_egl = [libpipe_loader_dynamic]
-if with_dri
-  link_for_egl += libgallium_dri
-endif
-if with_platform_windows
-  link_for_egl += libgallium_wgl
-endif
+override_for_egl = []
+link_for_egl = []
 deps_for_egl = []
 incs_for_egl = [inc_include, inc_src, inc_egl]
+
+if with_gallium_softpipe
+  c_args_for_egl += '-DGALLIUM_SOFTPIPE'
+endif
 
 files_egl = files(
   'main/eglapi.c',
@@ -76,7 +92,7 @@ g_egldispatchstubs_h = custom_target(
   capture : true,
 )
 
-if with_dri
+if with_dri2
   files_egl += files(
     'drivers/dri2/egl_dri2.c',
     'drivers/dri2/egl_dri2.h',
@@ -85,7 +101,6 @@ if with_dri
   deps_for_egl += idep_xmlconfig
   link_for_egl += libloader
   incs_for_egl += inc_loader
-  incs_for_egl += inc_loader_x11
   incs_for_egl += inc_gallium
   incs_for_egl += inc_gallium_aux
   incs_for_egl += inc_mesa
@@ -98,11 +113,11 @@ if with_dri
 
   if with_platform_x11
     files_egl += files('drivers/dri2/platform_x11.c')
-    if with_dri_platform == 'drm'
+    if with_dri3
       files_egl += files('drivers/dri2/platform_x11_dri3.c')
-      link_for_egl += [libloader_x11]
+      link_for_egl += libloader_dri3_helper
     endif
-    deps_for_egl += [dep_x11_xcb, dep_xcb_dri2, dep_xcb_xrandr, dep_xcb_xfixes, dep_xcb_shm]
+    deps_for_egl += [dep_x11_xcb, dep_xcb_dri2, dep_xcb_xrandr, dep_xcb_xfixes]
   endif
   if with_gbm and not with_platform_android
     files_egl += files('drivers/dri2/platform_drm.c')
@@ -112,26 +127,31 @@ if with_dri
   endif
   if with_platform_wayland
     deps_for_egl += [dep_wayland_client, dep_wayland_server, dep_wayland_egl_headers]
-    link_for_egl += [libwayland_drm, libloader_wayland_helper]
+    link_for_egl += libwayland_drm
     files_egl += files('drivers/dri2/platform_wayland.c')
-    files_egl += wp_files['linux-dmabuf-unstable-v1']
-    files_egl += [wayland_drm_client_protocol_h]
+    files_egl += [
+      linux_dmabuf_unstable_v1_protocol_c,
+      linux_dmabuf_unstable_v1_client_protocol_h,
+      wayland_drm_client_protocol_h,
+    ]
     incs_for_egl += include_directories('wayland/wayland-drm')
   endif
   if with_platform_android
-    deps_for_egl += [dep_android, idep_u_gralloc]
+    deps_for_egl += dep_android
     files_egl += files('drivers/dri2/platform_android.c')
+    if dep_android_mapper4.found()
+      files_egl += files('drivers/dri2/platform_android_mapper.cpp')
+      c_args_for_egl += '-DUSE_IMAPPER4_METADATA_API'
+      cpp_args_for_egl += '-DUSE_IMAPPER4_METADATA_API'
+      override_for_egl += 'cpp_std=c++17'
+    endif
   endif
 elif with_platform_haiku
   c_args_for_egl += [
     '-D_EGL_BUILT_IN_DRIVER_HAIKU',
   ]
   files_egl += files('drivers/haiku/egl_haiku.cpp')
-
-  incs_for_egl += [inc_gallium, inc_gallium_aux, inc_gallium_drivers, inc_gallium_winsys, inc_gallium_winsys_sw]
-  incs_for_egl += [inc_mesa, inc_mapi]
-  incs_for_egl += [include_directories('../gallium/frontends/hgl')]
-
+  incs_for_egl += [include_directories('../mapi', '../mesa', '../gallium/auxiliary', '../gallium/drivers', '../gallium/winsys', '../gallium/frontends/hgl', '../gallium/winsys/sw/hgl')]
   link_for_egl += [libmesa, libgallium, libswhgl, libsthgl]
   deps_for_egl += [cpp.find_library('be'), driver_swrast]
 elif with_platform_windows
@@ -141,9 +161,6 @@ elif with_platform_windows
   files_egl += files('drivers/wgl/egl_wgl.c')
   incs_for_egl += [inc_wgl, inc_gallium, inc_gallium_aux, inc_mesa, inc_mapi]
   link_for_egl += libgallium_wgl
-
-else
-  error('No EGL driver available.')
 endif
 
 if cc.has_function('mincore')
@@ -168,7 +185,6 @@ else
     input : 'main/50_mesa.json',
     output: '50_@0@.json'.format(glvnd_vendor_name),
     install : true,
-    install_tag : 'runtime',
     install_dir : join_paths(get_option('datadir'), 'glvnd', 'egl_vendor.d')
   )
 endif
@@ -188,6 +204,7 @@ libegl = shared_library(
     '-D_EGL_NATIVE_PLATFORM=_EGL_PLATFORM_@0@'.format(egl_native_platform.to_upper()),
   ],
   cpp_args : [cpp_args_for_egl],
+  override_options : override_for_egl,
   gnu_symbol_visibility : 'hidden',
   include_directories : incs_for_egl,
   link_with : [link_for_egl, libglapi],

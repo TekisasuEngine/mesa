@@ -1,11 +1,29 @@
 /*
- * Copyright © 2010-2011 Marcin Kościelnicki <koriakin@0x04.net>
- * Copyright © 2010 Luca Barbieri <luca@luca-barbieri.com>
- * Copyright © 2010 Francisco Jerez <currojerez@riseup.net>
- * Copyright © 2010 Martin Peres <martin.peres@ensi-bourges.fr>
- * Copyright © 2010 Marcin Slusarz <marcin.slusarz@gmail.com>
+ * Copyright (C) 2010-2011 Marcin Kościelnicki <koriakin@0x04.net>
+ * Copyright (C) 2010 Luca Barbieri <luca@luca-barbieri.com>
+ * Copyright (C) 2010 Francisco Jerez <currojerez@riseup.net>
+ * Copyright (C) 2010 Martin Peres <martin.peres@ensi-bourges.fr>
+ * Copyright (C) 2010 Marcin Slusarz <marcin.slusarz@gmail.com>
  * All Rights Reserved.
- * SPDX-License-Identifier: MIT
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
  */
 
 /* workaround libxml2 silliness: */
@@ -26,12 +44,9 @@
 #include "util/u_debug.h"
 
 static char *catstr (char *a, char *b) {
-	char *res;
-
 	if (!a)
 		return b;
-
-	return asprintf(&res, "%s_%s", a, b) < 0 ? NULL : res;
+	return aprintf("%s_%s", a, b);
 }
 
 static int strdiff (const char *a, const char *b) {
@@ -518,8 +533,6 @@ static struct rnndelem *trydelem(struct rnndb *db, char *file, xmlNode *node) {
 				if (!res->index) {
 					rnn_err(db, "%s:%d: invalid enum name \"%s\"\n", file, node->line, enumname);
 				}
-			} else if (!strcmp(attr->name, "usage")) {
-				// no-op
 			} else {
 				rnn_err(db, "%s:%d: wrong attribute \"%s\" for %s\n", file, node->line, attr->name, node->name);
 			}
@@ -588,8 +601,6 @@ static struct rnndelem *trydelem(struct rnndb *db, char *file, xmlNode *node) {
 				res->access = RNN_ACCESS_RW;
 			else
 				fprintf (stderr, "%s:%d: wrong access type \"%s\" for register\n", file, node->line, str);
-		} else if (!strcmp(attr->name, "usage")) {
-			// no-op
 		} else if (!trytypeattr(db, file, node, attr, &res->typeinfo)) {
 			rnn_err(db, "%s:%d: wrong attribute \"%s\" for register\n", file, node->line, attr->name);
 		}
@@ -1213,19 +1224,8 @@ static void preptypeinfo(struct rnndb *db, struct rnntypeinfo *ti, char *prefix,
 	if (ti->addvariant && ti->type != RNN_TTYPE_ENUM) {
 		rnn_err(db, "%s: addvariant specified on non-enum type %s\n", prefix, ti->name);
 	}
-	for (i = 0; i < ti->bitfieldsnum; i++) {
+	for (i = 0; i < ti->bitfieldsnum; i++)
 		prepbitfield(db,  ti->bitfields[i], prefix, vi);
-		if (ti->bitfields[i]->typeinfo.addvariant) {
-			for (int j = 0; j < i; j++) {
-				if (!ti->bitfields[j]->typeinfo.addvariant) {
-					struct rnnbitfield *t = ti->bitfields[j];
-					ti->bitfields[j] = ti->bitfields[i];
-					ti->bitfields[i] = t;
-					break;
-				}
-			}
-		}
-	}
 	for (i = 0; i < ti->valsnum; i++)
 		prepvalue(db, ti->vals[i], prefix, vi);
 }

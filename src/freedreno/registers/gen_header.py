@@ -1,16 +1,8 @@
 #!/usr/bin/python3
-#
-# Copyright © 2019-2024 Google, Inc.
-#
-# SPDX-License-Identifier: MIT
 
 import xml.parsers.expat
 import sys
 import os
-import collections
-import argparse
-import time
-import datetime
 
 class Error(Exception):
 	def __init__(self, message):
@@ -27,10 +19,8 @@ class Enum(object):
 				return True
 		return False
 
-	def names(self):
-		return [n for (n, value) in self.values]
-
-	def dump(self, is_deprecated):
+	def dump(self):
+		prev = 0
 		use_hex = False
 		for (name, value) in self.values:
 			if value > 0x1000:
@@ -44,7 +34,7 @@ class Enum(object):
 				print("\t%s = %d," % (name, value))
 		print("};\n")
 
-	def dump_pack_struct(self, is_deprecated):
+	def dump_pack_struct(self):
 		pass
 
 class Field(object):
@@ -57,7 +47,7 @@ class Field(object):
 
 		builtin_types = [ None, "a3xx_regid", "boolean", "uint", "hex", "int", "fixed", "ufixed", "float", "address", "waddress" ]
 
-		maxpos = parser.current_bitsize - 1
+		maxpos = parser.current_bitsize - 1;
 
 		if low < 0 or low > maxpos:
 			raise parser.error("low attribute out of range: %d" % low)
@@ -66,14 +56,14 @@ class Field(object):
 		if high < low:
 			raise parser.error("low is greater than high: low=%d, high=%d" % (low, high))
 		if self.type == "boolean" and not low == high:
-			raise parser.error("booleans should be 1 bit fields")
+			raise parser.error("booleans should be 1 bit fields");
 		elif self.type == "float" and not (high - low == 31 or high - low == 15):
 			raise parser.error("floats should be 16 or 32 bit fields")
-		elif self.type not in builtin_types and self.type not in parser.enums:
-			raise parser.error("unknown type '%s'" % self.type)
+		elif not self.type in builtin_types and not self.type in parser.enums:
+			raise parser.error("unknown type '%s'" % self.type);
 
 	def ctype(self, var_name):
-		if self.type is None:
+		if self.type == None:
 			type = "uint32_t"
 			val = var_name
 		elif self.type == "boolean":
@@ -131,20 +121,6 @@ def field_name(reg, f):
 
 	return name
 
-# indices - array of (ctype, stride, __offsets_NAME)
-def indices_varlist(indices):
-	return ", ".join(["i%d" % i for i in range(len(indices))])
-
-def indices_prototype(indices):
-	return ", ".join(["%s i%d" % (ctype, idx)
-			for (idx, (ctype, stride, offset)) in  enumerate(indices)])
-
-def indices_strides(indices):
-	return " + ".join(["0x%x*i%d" % (stride, idx)
-					if stride else
-					"%s(i%d)" % (offset, idx)
-			for (idx, (ctype, stride, offset)) in  enumerate(indices)])
-
 class Bitset(object):
 	def __init__(self, name, template):
 		self.name = name
@@ -174,7 +150,11 @@ class Bitset(object):
 		print("#endif\n")
 
 		print("    return (struct fd_reg_pair) {")
-		print("        .reg = (uint32_t)%s," % reg.reg_offset())
+		if reg.array:
+			print("        .reg = REG_%s(__i)," % reg.full_name)
+		else:
+			print("        .reg = REG_%s," % reg.full_name)
+
 		print("        .value =")
 		for f in self.fields:
 			if f.type in [ "address", "waddress" ]:
@@ -199,7 +179,7 @@ class Bitset(object):
 
 		print("    };")
 
-	def dump_pack_struct(self, is_deprecated, reg=None):
+	def dump_pack_struct(self, reg=None):
 		if not reg:
 			return
 
@@ -224,15 +204,12 @@ class Bitset(object):
 			tab_to("    uint32_t", "dword;")
 		print("};\n")
 
-		depcrstr = ""
-		if is_deprecated:
-			depcrstr = " __attribute__((deprecated))"
 		if reg.array:
-			print("static inline%s struct fd_reg_pair\npack_%s(uint32_t __i, struct %s fields)\n{" %
-				  (depcrstr, prefix, prefix))
+			print("static inline struct fd_reg_pair\npack_%s(uint32_t __i, struct %s fields)\n{" %
+				  (prefix, prefix));
 		else:
-			print("static inline%s struct fd_reg_pair\npack_%s(struct %s fields)\n{" %
-				  (depcrstr, prefix, prefix))
+			print("static inline struct fd_reg_pair\npack_%s(struct %s fields)\n{" %
+				  (prefix, prefix));
 
 		self.dump_regpair_builder(reg)
 
@@ -244,15 +221,15 @@ class Bitset(object):
 			skip = ""
 
 		if reg.array:
-			print("#define %s(__i, ...) pack_%s(__i, __struct_cast(%s) { __VA_ARGS__ })%s\n" %
+			print("#define %s(__i, ...) pack_%s(__i, (struct %s) { __VA_ARGS__ })%s\n" %
 				  (prefix, prefix, prefix, skip))
 		else:
-			print("#define %s(...) pack_%s(__struct_cast(%s) { __VA_ARGS__ })%s\n" %
+			print("#define %s(...) pack_%s((struct %s) { __VA_ARGS__ })%s\n" %
 				  (prefix, prefix, prefix, skip))
 
 
-	def dump(self, is_deprecated, prefix=None):
-		if prefix is None:
+	def dump(self, prefix=None):
+		if prefix == None:
 			prefix = self.name
 		for f in self.fields:
 			if f.name:
@@ -260,9 +237,9 @@ class Bitset(object):
 			else:
 				name = prefix
 
-			if not f.name and f.low == 0 and f.shr == 0 and f.type not in ["float", "fixed", "ufixed"]:
+			if not f.name and f.low == 0 and f.shr == 0 and not f.type in ["float", "fixed", "ufixed"]:
 				pass
-			elif f.type == "boolean" or (f.type is None and f.low == f.high):
+			elif f.type == "boolean" or (f.type == None and f.low == f.high):
 				tab_to("#define %s" % name, "0x%08x" % (1 << f.low))
 			else:
 				tab_to("#define %s__MASK" % name, "0x%08x" % mask(f.low, f.high))
@@ -276,89 +253,20 @@ class Bitset(object):
 		print()
 
 class Array(object):
-	def __init__(self, attrs, domain, variant, parent, index_type):
+	def __init__(self, attrs, domain):
 		if "name" in attrs:
-			self.local_name = attrs["name"]
+			self.name = attrs["name"]
 		else:
-			self.local_name = ""
+			self.name = ""
 		self.domain = domain
-		self.variant = variant
-		self.parent = parent
-		if self.parent:
-			self.name = self.parent.name + "_" + self.local_name
-		else:
-			self.name = self.local_name
-		if "offsets" in attrs:
-			self.offsets = map(lambda i: "0x%08x" % int(i, 0), attrs["offsets"].split(","))
-			self.fixed_offsets = True
-		elif "doffsets" in attrs:
-			self.offsets = map(lambda s: "(%s)" % s , attrs["doffsets"].split(","))
-			self.fixed_offsets = True
-		else:
-			self.offset = int(attrs["offset"], 0)
-			self.stride = int(attrs["stride"], 0)
-			self.fixed_offsets = False
-		if "index" in attrs:
-			self.index_type = index_type
-		else:
-			self.index_type = None
+		self.offset = int(attrs["offset"], 0)
+		self.stride = int(attrs["stride"], 0)
 		self.length = int(attrs["length"], 0)
-		if "usage" in attrs:
-			self.usages = attrs["usage"].split(',')
-		else:
-			self.usages = None
 
-	def index_ctype(self):
-		if not self.index_type:
-			return "uint32_t"
-		else:
-			return "enum %s" % self.index_type.name
+	def dump(self):
+		print("#define REG_%s_%s(i0) (0x%08x + 0x%x*(i0))\n" % (self.domain, self.name, self.offset, self.stride))
 
-	# Generate array of (ctype, stride, __offsets_NAME)
-	def indices(self):
-		if self.parent:
-			indices = self.parent.indices()
-		else:
-			indices = []
-		if self.length != 1:
-			if self.fixed_offsets:
-				indices.append((self.index_ctype(), None, f"__offset_{self.local_name}"))
-			else:
-				indices.append((self.index_ctype(), self.stride, None))
-		return indices
-
-	def total_offset(self):
-		offset = 0
-		if not self.fixed_offsets:
-			offset += self.offset
-		if self.parent:
-			offset += self.parent.total_offset()
-		return offset
-
-	def dump(self, is_deprecated):
-		depcrstr = ""
-		if is_deprecated:
-			depcrstr = " __attribute__((deprecated))"
-		proto = indices_varlist(self.indices())
-		strides = indices_strides(self.indices())
-		array_offset = self.total_offset()
-		if self.fixed_offsets:
-			print("static inline%s uint32_t __offset_%s(%s idx)" % (depcrstr, self.local_name, self.index_ctype()))
-			print("{\n\tswitch (idx) {")
-			if self.index_type:
-				for val, offset in zip(self.index_type.names(), self.offsets):
-					print("\t\tcase %s: return %s;" % (val, offset))
-			else:
-				for idx, offset in enumerate(self.offsets):
-					print("\t\tcase %d: return %s;" % (idx, offset))
-			print("\t\tdefault: return INVALID_IDX(idx);")
-			print("\t}\n}")
-		if proto == '':
-			tab_to("#define REG_%s_%s" % (self.domain, self.name), "0x%08x\n" % array_offset)
-		else:
-			tab_to("#define REG_%s_%s(%s)" % (self.domain, self.name, proto), "(0x%08x + %s )\n" % (array_offset, strides))
-
-	def dump_pack_struct(self, is_deprecated):
+	def dump_pack_struct(self):
 		pass
 
 	def dump_regpair_builder(self):
@@ -375,62 +283,25 @@ class Reg(object):
 		if array:
 			self.name = array.name + "_" + self.name
 		self.full_name = self.domain + "_" + self.name
-		if "stride" in attrs:
-			self.stride = int(attrs["stride"], 0)
-			self.length = int(attrs["length"], 0)
-		else:
-			self.stride = None
-			self.length = None
 
-	# Generate array of (ctype, stride, __offsets_NAME)
-	def indices(self):
-		if self.array:
-			indices = self.array.indices()
-		else:
-			indices = []
-		if self.stride:
-			indices.append(("uint32_t", self.stride, None))
-		return indices
-
-	def total_offset(self):
-		if self.array:
-			return self.array.total_offset() + self.offset
-		else:
-			return self.offset
-
-	def reg_offset(self):
+	def dump(self):
 		if self.array:
 			offset = self.array.offset + self.offset
-			return "(0x%08x + 0x%x*__i)" % (offset, self.array.stride)
-		return "0x%08x" % self.offset
-
-	def dump(self, is_deprecated):
-		depcrstr = ""
-		if is_deprecated:
-			depcrstr = " __attribute__((deprecated)) "
-		proto = indices_prototype(self.indices())
-		strides = indices_strides(self.indices())
-		offset = self.total_offset()
-		if proto == '':
-			tab_to("#define REG_%s" % self.full_name, "0x%08x" % offset)
+			print("static inline uint32_t REG_%s(uint32_t i0) { return 0x%08x + 0x%x*i0; }" % (self.full_name, offset, self.array.stride))
 		else:
-			print("static inline%s uint32_t REG_%s(%s) { return 0x%08x + %s; }" % (depcrstr, self.full_name, proto, offset, strides))
+			tab_to("#define REG_%s" % self.full_name, "0x%08x" % self.offset)
 
 		if self.bitset.inline:
-			self.bitset.dump(is_deprecated, self.full_name)
+			self.bitset.dump(self.full_name)
 		print("")
 
-	def dump_pack_struct(self, is_deprecated):
+	def dump_pack_struct(self):
 		if self.bitset.inline:
-			self.bitset.dump_pack_struct(is_deprecated, self)
+			self.bitset.dump_pack_struct(self)
 
 	def dump_regpair_builder(self):
 		if self.bitset.inline:
 			self.bitset.dump_regpair_builder(self)
-
-	def dump_py(self):
-		print("\tREG_%s = 0x%08x" % (self.full_name, self.offset))
-
 
 class Parser(object):
 	def __init__(self):
@@ -447,17 +318,9 @@ class Parser(object):
 		# Regs that have multiple variants.. we only generated the C++
 		# template based struct-packers for these
 		self.variant_regs = {}
-		# Information in which contexts regs are used, to be used in
-		# debug options
-		self.usage_regs = collections.defaultdict(list)
 		self.bitsets = {}
 		self.enums = {}
-		self.variants = set()
 		self.file = []
-		self.xml_files = []
-		self.copyright_year = None
-		self.authors = []
-		self.license = None
 
 	def error(self, message):
 		parser, filename = self.stack[-1]
@@ -501,7 +364,7 @@ class Parser(object):
 
 			self.current_bitset.fields.append(b)
 		except ValueError as e:
-			raise self.error(e)
+			raise self.error(e);
 
 	def parse_varset(self, attrs):
 		# Inherit the varset from the enclosing domain if not overriden:
@@ -511,7 +374,7 @@ class Parser(object):
 		return varset
 
 	def parse_variants(self, attrs):
-		if "variants" not in attrs:
+		if not "variants" in attrs:
 				return None
 		variant = attrs["variants"].split(",")[0]
 		if "-" in variant:
@@ -523,13 +386,11 @@ class Parser(object):
 
 		return variant
 
-	def add_all_variants(self, reg, attrs, parent_variant):
+	def add_all_variants(self, reg, attrs):
 		# TODO this should really handle *all* variants, including dealing
 		# with open ended ranges (ie. "A2XX,A4XX-") (we have the varset
 		# enum now to make that possible)
 		variant = self.parse_variants(attrs)
-		if not variant:
-			variant = parent_variant
 
 		if reg.name not in self.variant_regs:
 			self.variant_regs[reg.name] = {}
@@ -538,16 +399,7 @@ class Parser(object):
 			v = next(iter(self.variant_regs[reg.name]))
 			assert self.variant_regs[reg.name][v].bit_size == reg.bit_size
 
-		self.variant_regs[reg.name][variant] = reg
-
-	def add_all_usages(self, reg, usages):
-		if not usages:
-			return
-
-		for usage in usages:
-			self.usage_regs[usage].append(reg)
-
-		self.variants.add(reg.domain)
+		self.variant_regs[reg.name][variant] = reg;
 
 	def do_validate(self, schemafile):
 		try:
@@ -577,23 +429,16 @@ class Parser(object):
 
 			xml_doc = etree.parse(filename)
 			if not xmlschema.validate(xml_doc):
-				error_str = str(xmlschema.error_log.filter_from_errors()[0])
-				raise self.error("Schema validation failed for: " + filename + "\n" + error_str)
+				raise self.error("Schema validation failed for: " + filename)
 		except ImportError:
 			print("lxml not found, skipping validation", file=sys.stderr)
 
 	def do_parse(self, filename):
-		filepath = os.path.abspath(filename)
-		if filepath in self.xml_files:
-			return
-		self.xml_files.append(filepath)
 		file = open(filename, "rb")
 		parser = xml.parsers.expat.ParserCreate()
 		self.stack.append((parser, filename))
 		parser.StartElementHandler = self.start_element
 		parser.EndElementHandler = self.end_element
-		parser.CharacterDataHandler = self.character_data
-		parser.buffer_text = True
 		parser.ParseFile(file)
 		self.stack.pop()
 		file.close()
@@ -619,9 +464,6 @@ class Parser(object):
 				self.parse_field(None, attrs)
 
 		variant = self.parse_variants(attrs)
-		if not variant and self.current_array:
-			variant = self.current_array.variant
-
 		self.current_reg = Reg(attrs, self.prefix(variant), self.current_array, bit_size)
 		self.current_reg.bitset = self.current_bitset
 
@@ -629,18 +471,9 @@ class Parser(object):
 			self.file.append(self.current_reg)
 
 		if variant is not None:
-			self.add_all_variants(self.current_reg, attrs, variant)
-
-		usages = None
-		if "usage" in attrs:
-			usages = attrs["usage"].split(',')
-		elif self.current_array:
-			usages = self.current_array.usages
-
-		self.add_all_usages(self.current_reg, usages)
+			self.add_all_variants(self.current_reg, attrs)
 
 	def start_element(self, name, attrs):
-		self.cdata = ""
 		if name == "import":
 			filename = attrs["file"]
 			self.do_parse(os.path.join(self.path, filename))
@@ -668,6 +501,7 @@ class Parser(object):
 			else:
 				value = self.current_enum_value
 			self.current_enum.values.append((attrs["name"], value))
+			# self.current_enum_value = value + 1
 		elif name == "reg32":
 			self.parse_reg(attrs, 32)
 		elif name == "reg64":
@@ -675,8 +509,7 @@ class Parser(object):
 		elif name == "array":
 			self.current_bitsize = 32
 			variant = self.parse_variants(attrs)
-			index_type = self.enums[attrs["index"]] if "index" in attrs else None
-			self.current_array = Array(attrs, self.prefix(variant), variant, self.current_array, index_type)
+			self.current_array = Array(attrs, self.prefix(variant))
 			if len(self.stack) == 1:
 				self.file.append(self.current_array)
 		elif name == "bitset":
@@ -690,16 +523,13 @@ class Parser(object):
 			self.parse_field(attrs["name"], attrs)
 		elif name == "database":
 			self.do_validate(attrs["xsi:schemaLocation"])
-		elif name == "copyright":
-			self.copyright_year = attrs["year"]
-		elif name == "author":
-			self.authors.append(attrs["name"] + " <" + attrs["email"] + "> " + attrs["name"])
 
 	def end_element(self, name):
 		if name == "domain":
 			self.current_domain = None
 			self.current_prefix = None
 			self.current_prefix_type = None
+			self.current_domain = None
 		elif name == "stripe":
 			self.current_stripe = None
 		elif name == "bitset":
@@ -707,58 +537,9 @@ class Parser(object):
 		elif name == "reg32":
 			self.current_reg = None
 		elif name == "array":
-			self.current_array = self.current_array.parent
+			self.current_array = None;
 		elif name == "enum":
 			self.current_enum = None
-		elif name == "license":
-			self.license = self.cdata
-
-	def character_data(self, data):
-		self.cdata += data
-
-	def dump_reg_usages(self):
-		d = collections.defaultdict(list)
-		for usage, regs in self.usage_regs.items():
-			for reg in regs:
-				variants = self.variant_regs.get(reg.name)
-				if variants:
-					for variant, vreg in variants.items():
-						if reg == vreg:
-							d[(usage, variant)].append(reg)
-				else:
-					for variant in self.variants:
-						d[(usage, variant)].append(reg)
-
-		print("#ifdef __cplusplus")
-
-		for usage, regs in self.usage_regs.items():
-			print("template<chip CHIP> constexpr inline uint16_t %s_REGS[] = {};" % (usage.upper()))
-
-		for (usage, variant), regs in d.items():
-			offsets = []
-
-			for reg in regs:
-				if reg.array:
-					for i in range(reg.array.length):
-						offsets.append(reg.array.offset + reg.offset + i * reg.array.stride)
-						if reg.bit_size == 64:
-							offsets.append(offsets[-1] + 1)
-				else:
-					offsets.append(reg.offset)
-					if reg.bit_size == 64:
-						offsets.append(offsets[-1] + 1)
-
-			offsets.sort()
-
-			print("template<> constexpr inline uint16_t %s_REGS<%s>[] = {" % (usage.upper(), variant))
-			for offset in offsets:
-				print("\t%s," % hex(offset))
-			print("};")
-
-		print("#endif")
-
-	def has_variants(self, reg):
-		return reg.name in self.variant_regs and len(self.variant_regs[reg.name]) > 1
 
 	def dump(self):
 		enums = []
@@ -773,26 +554,13 @@ class Parser(object):
 				regs.append(e)
 
 		for e in enums + bitsets + regs:
-			e.dump(self.has_variants(e))
-
-		self.dump_reg_usages()
-
-
-	def dump_regs_py(self):
-		regs = []
-		for e in self.file:
-			if isinstance(e, Reg):
-				regs.append(e)
-
-		for e in regs:
-			e.dump_py()
-
+			e.dump()
 
 	def dump_reg_variants(self, regname, variants):
 		# Don't bother for things that only have a single variant:
 		if len(variants) == 1:
 			return
-		print("#ifdef __cplusplus")
+		print("#ifdef __cplusplus");
 		print("struct __%s {" % regname)
 		# TODO be more clever.. we should probably figure out which
 		# fields have the same type in all variants (in which they
@@ -858,119 +626,41 @@ class Parser(object):
 
 	def dump_structs(self):
 		for e in self.file:
-			e.dump_pack_struct(self.has_variants(e))
+			e.dump_pack_struct()
 
 		for regname in self.variant_regs:
 			self.dump_reg_variants(regname, self.variant_regs[regname])
 
 
-def dump_c(args, guard, func):
+def main():
 	p = Parser()
-
-	try:
-		p.parse(args.rnn, args.xml)
-	except Error as e:
-		print(e, file=sys.stderr)
-		exit(1)
+	rnn_path = sys.argv[1]
+	xml_file = sys.argv[2]
+	if len(sys.argv) > 3 and sys.argv[3] == '--pack-structs':
+		do_structs = True
+		guard = str.replace(os.path.basename(xml_file), '.', '_').upper() + '_STRUCTS'
+	else:
+		do_structs = False
+		guard = str.replace(os.path.basename(xml_file), '.', '_').upper()
 
 	print("#ifndef %s\n#define %s\n" % (guard, guard))
 
-	print("""/* Autogenerated file, DO NOT EDIT manually!
-
-This file was generated by the rules-ng-ng gen_header.py tool in this git repository:
-http://gitlab.freedesktop.org/mesa/mesa/
-git clone https://gitlab.freedesktop.org/mesa/mesa.git
-
-The rules-ng-ng source files this header was generated from are:
-""")
-	maxlen = 0
-	for filepath in p.xml_files:
-		maxlen = max(maxlen, len(filepath))
-	for filepath in p.xml_files:
-		pad = " " * (maxlen - len(filepath))
-		filesize = str(os.path.getsize(filepath))
-		filesize = " " * (7 - len(filesize)) + filesize
-		filetime = time.ctime(os.path.getmtime(filepath))
-		print("- " + filepath + pad + " (" + filesize + " bytes, from " + filetime + ")")
-	if p.copyright_year:
-		current_year = str(datetime.date.today().year)
-		print()
-		print("Copyright © %s-%s by the following authors:" % (p.copyright_year, current_year))
-		for author in p.authors:
-			print("- " + author)
-	if p.license:
-		print(p.license)
-	print("*/")
-
 	print()
-	print("#ifdef __KERNEL__")
-	print("#include <linux/bug.h>")
-	print("#define assert(x) BUG_ON(!(x))")
-	print("#else")
 	print("#include <assert.h>")
-	print("#endif")
 	print()
-
-	print("#ifdef __cplusplus")
-	print("#define __struct_cast(X)")
-	print("#else")
-	print("#define __struct_cast(X) (struct X)")
-	print("#endif")
-	print()
-
-	func(p)
-
-	print("\n#endif /* %s */" % guard)
-
-
-def dump_c_defines(args):
-	guard = str.replace(os.path.basename(args.xml), '.', '_').upper()
-	dump_c(args, guard, lambda p: p.dump())
-
-
-def dump_c_pack_structs(args):
-	guard = str.replace(os.path.basename(args.xml), '.', '_').upper() + '_STRUCTS'
-	dump_c(args, guard, lambda p: p.dump_structs())
-
-
-def dump_py_defines(args):
-	p = Parser()
 
 	try:
-		p.parse(args.rnn, args.xml)
+		p.parse(rnn_path, xml_file)
 	except Error as e:
 		print(e, file=sys.stderr)
 		exit(1)
 
-	file_name = os.path.splitext(os.path.basename(args.xml))[0]
+	if do_structs:
+		p.dump_structs()
+	else:
+		p.dump()
 
-	print("from enum import IntEnum")
-	print("class %sRegs(IntEnum):" % file_name.upper())
-
-	os.path.basename(args.xml)
-
-	p.dump_regs_py()
-
-
-def main():
-	parser = argparse.ArgumentParser()
-	parser.add_argument('--rnn', type=str, required=True)
-	parser.add_argument('--xml', type=str, required=True)
-
-	subparsers = parser.add_subparsers(required=True)
-
-	parser_c_defines = subparsers.add_parser('c-defines')
-	parser_c_defines.set_defaults(func=dump_c_defines)
-
-	parser_c_pack_structs = subparsers.add_parser('c-pack-structs')
-	parser_c_pack_structs.set_defaults(func=dump_c_pack_structs)
-
-	parser_py_defines = subparsers.add_parser('py-defines')
-	parser_py_defines.set_defaults(func=dump_py_defines)
-
-	args = parser.parse_args()
-	args.func(args)
-
+	print("\n#endif /* %s */" % guard)
 
 if __name__ == '__main__':
 	main()

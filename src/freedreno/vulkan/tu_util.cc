@@ -8,7 +8,6 @@
 #include <errno.h>
 #include <stdarg.h>
 
-#include "common/freedreno_rd_output.h"
 #include "util/u_math.h"
 #include "util/timespec.h"
 #include "vk_enum_to_str.h"
@@ -32,19 +31,11 @@ static const struct debug_control tu_debug_options[] = {
    { "perfc", TU_DEBUG_PERFC },
    { "flushall", TU_DEBUG_FLUSHALL },
    { "syncdraw", TU_DEBUG_SYNCDRAW },
-   { "push_consts_per_stage", TU_DEBUG_PUSH_CONSTS_PER_STAGE },
    { "rast_order", TU_DEBUG_RAST_ORDER },
    { "unaligned_store", TU_DEBUG_UNALIGNED_STORE },
    { "log_skip_gmem_ops", TU_DEBUG_LOG_SKIP_GMEM_OPS },
    { "dynamic", TU_DEBUG_DYNAMIC },
    { "bos", TU_DEBUG_BOS },
-   { "3d_load", TU_DEBUG_3D_LOAD },
-   { "fdm", TU_DEBUG_FDM },
-   { "noconform", TU_DEBUG_NOCONFORM },
-   { "rd", TU_DEBUG_RD },
-   { "hiprio", TU_DEBUG_HIPRIO },
-   { "noconcurrentresolves", TU_DEBUG_NO_CONCURRENT_RESOLVES },
-   { "noconcurrentunresolves", TU_DEBUG_NO_CONCURRENT_UNRESOLVES },
    { NULL, 0 }
 };
 
@@ -58,19 +49,11 @@ tu_env_init_once(void)
 
    if (TU_DEBUG(STARTUP))
       mesa_logi("TU_DEBUG=0x%x", tu_env.debug);
-
-   /* TU_DEBUG=rd functionality was moved to fd_rd_output. This debug option
-    * should translate to the basic-level FD_RD_DUMP_ENABLE option.
-    */
-   if (TU_DEBUG(RD))
-      fd_rd_dump_env.flags |= FD_RD_DUMP_ENABLE;
 }
 
 void
 tu_env_init(void)
 {
-   fd_rd_dump_env_init();
-
    static once_flag once = ONCE_FLAG_INIT;
    call_once(&once, tu_env_init_once);
 }
@@ -91,6 +74,7 @@ void PRINTFLIKE(3, 4)
 VkResult
 __vk_startup_errorf(struct tu_instance *instance,
                     VkResult error,
+                    bool always_print,
                     const char *file,
                     int line,
                     const char *format,
@@ -100,6 +84,11 @@ __vk_startup_errorf(struct tu_instance *instance,
    char buffer[256];
 
    const char *error_str = vk_Result_to_str(error);
+
+#ifndef DEBUG
+   if (!always_print)
+      return error;
+#endif
 
    if (format) {
       va_start(ap, format);
@@ -132,7 +121,13 @@ tu_tiling_config_update_tile_layout(struct tu_framebuffer *fb,
     *   used.
     */
 
-   uint32_t layers = MAX2(fb->layers, pass->num_views);
+   uint32_t layers = fb->layers;
+   if (pass->subpasses[0].multiview_mask) {
+      uint32_t view_mask = 0;
+      for (unsigned i = 0; i < pass->subpass_count; i++)
+         view_mask |= pass->subpasses[i].multiview_mask;
+      layers = util_logbase2(view_mask) + 1;
+   }
 
    /* If there is more than one layer, we need to make sure that the layer
     * stride is expressible as an offset in RB_BLIT_BASE_GMEM which ignores
@@ -231,8 +226,7 @@ static void
 tu_tiling_config_update_pipe_layout(struct tu_tiling_config *tiling,
                                     const struct tu_device *dev)
 {
-   const uint32_t max_pipe_count =
-      dev->physical_device->info->num_vsc_pipes;
+   const uint32_t max_pipe_count = 32; /* A6xx */
 
    /* start from 1 tile per pipe */
    tiling->pipe0 = (VkExtent2D) {
@@ -258,8 +252,7 @@ static void
 tu_tiling_config_update_pipes(struct tu_tiling_config *tiling,
                               const struct tu_device *dev)
 {
-   const uint32_t max_pipe_count =
-      dev->physical_device->info->num_vsc_pipes;
+   const uint32_t max_pipe_count = 32; /* A6xx */
    const uint32_t used_pipe_count =
       tiling->pipe_count.width * tiling->pipe_count.height;
    const VkExtent2D last_pipe = {

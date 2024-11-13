@@ -28,15 +28,15 @@
 #include "nir.h"
 
 static bool
-is_def_live(const nir_def *def, BITSET_WORD *defs_live)
+is_dest_live(const nir_dest *dest, BITSET_WORD *defs_live)
 {
-   return BITSET_TEST(defs_live, def->index);
+   return !dest->is_ssa || BITSET_TEST(defs_live, dest->ssa.index);
 }
 
 static bool
 mark_src_live(const nir_src *src, BITSET_WORD *defs_live)
 {
-   if (!BITSET_TEST(defs_live, src->ssa->index)) {
+   if (src->is_ssa && !BITSET_TEST(defs_live, src->ssa->index)) {
       BITSET_SET(defs_live, src->ssa->index);
       return true;
    } else {
@@ -60,51 +60,41 @@ is_live(BITSET_WORD *defs_live, nir_instr *instr)
       return true;
    case nir_instr_type_alu: {
       nir_alu_instr *alu = nir_instr_as_alu(instr);
-      return is_def_live(&alu->def, defs_live);
+      return is_dest_live(&alu->dest.dest, defs_live);
    }
    case nir_instr_type_deref: {
       nir_deref_instr *deref = nir_instr_as_deref(instr);
-      return is_def_live(&deref->def, defs_live);
+      return is_dest_live(&deref->dest, defs_live);
    }
    case nir_instr_type_intrinsic: {
       nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
       const nir_intrinsic_info *info = &nir_intrinsic_infos[intrin->intrinsic];
       return !(info->flags & NIR_INTRINSIC_CAN_ELIMINATE) ||
-             (info->has_dest && is_def_live(&intrin->def, defs_live));
+             (info->has_dest && is_dest_live(&intrin->dest, defs_live));
    }
    case nir_instr_type_tex: {
       nir_tex_instr *tex = nir_instr_as_tex(instr);
-      return is_def_live(&tex->def, defs_live);
+      return is_dest_live(&tex->dest, defs_live);
    }
    case nir_instr_type_phi: {
       nir_phi_instr *phi = nir_instr_as_phi(instr);
-      return is_def_live(&phi->def, defs_live);
+      return is_dest_live(&phi->dest, defs_live);
    }
    case nir_instr_type_load_const: {
       nir_load_const_instr *lc = nir_instr_as_load_const(instr);
-      return is_def_live(&lc->def, defs_live);
+      return BITSET_TEST(defs_live, lc->def.index);
    }
-   case nir_instr_type_undef: {
-      nir_undef_instr *undef = nir_instr_as_undef(instr);
-      return is_def_live(&undef->def, defs_live);
+   case nir_instr_type_ssa_undef: {
+      nir_ssa_undef_instr *undef = nir_instr_as_ssa_undef(instr);
+      return BITSET_TEST(defs_live, undef->def.index);
    }
    case nir_instr_type_parallel_copy: {
       nir_parallel_copy_instr *pc = nir_instr_as_parallel_copy(instr);
       nir_foreach_parallel_copy_entry(entry, pc) {
-         if (entry->dest_is_reg || is_def_live(&entry->dest.def, defs_live))
+         if (is_dest_live(&entry->dest, defs_live))
             return true;
       }
       return false;
-   }
-   case nir_instr_type_debug_info: {
-      nir_debug_info_instr *di = nir_instr_as_debug_info(instr);
-      if (di->type == nir_debug_info_src_loc) {
-         nir_instr *next = nir_instr_next(instr);
-         return !next || next->type != nir_instr_type_debug_info;
-      } else if (di->type == nir_debug_info_string) {
-         return is_def_live(&di->def, defs_live);
-      }
-      return true;
    }
    default:
       unreachable("unexpected instr type");
@@ -248,7 +238,8 @@ nir_opt_dce_impl(nir_function_impl *impl)
    nir_instr_free_list(&dead_instrs);
 
    if (progress) {
-      nir_metadata_preserve(impl, nir_metadata_control_flow);
+      nir_metadata_preserve(impl, nir_metadata_block_index |
+                                  nir_metadata_dominance);
    } else {
       nir_metadata_preserve(impl, nir_metadata_all);
    }
@@ -260,8 +251,8 @@ bool
 nir_opt_dce(nir_shader *shader)
 {
    bool progress = false;
-   nir_foreach_function_impl(impl, shader) {
-      if (nir_opt_dce_impl(impl))
+   nir_foreach_function(function, shader) {
+      if (function->impl && nir_opt_dce_impl(function->impl))
          progress = true;
    }
 
